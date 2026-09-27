@@ -135,13 +135,14 @@ function initDb() {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', datetime('now'))
     `);
 
-    insertCustomer.run('cust_1', 'Ramesh Sharma', '+91 98234 56789', 'ramesh.sharma@example.com', 'Green Glen Layout, Bellandur', 'House A-102', 'cow_standard', 1.0, 'Morning', 26, 'cash', 'ramesh@upi', 250.0);
+    // Ramesh Sharma has billing cycle start day 29 (triggers 2-day advance warning on Sep 27!)
+    insertCustomer.run('cust_1', 'Ramesh Sharma', '+91 98234 56789', 'ramesh.sharma@example.com', 'Green Glen Layout, Bellandur', 'House A-102', 'cow_standard', 1.0, 'Morning', 29, 'cash', 'ramesh@upi', 250.0);
     insertCustomer.run('cust_2', 'Priya Patel', '+91 98765 12340', 'priya.patel@example.com', 'Shanti Niketan Apartments, Indiranagar', 'Flat B-204', 'buffalo_pure', 1.5, 'Morning', 1, 'upi', 'priya@okhdfcbank', 0.0);
     insertCustomer.run('cust_3', 'Amit Verma', '+91 91234 78901', 'amit.verma@example.com', 'Prestige Enclave, Whitefield', 'Villa C-105', 'cow_standard', 0.5, 'Both', 10, 'upi', 'amit.v@oksbi', 0.0);
     insertCustomer.run('cust_4', 'Sunita Rao', '+91 94567 89012', 'sunita.rao@example.com', 'Rosewood Heights, HSR Sector 2', 'Flat D-301', 'buffalo_pure', 2.0, 'Morning', 26, 'cash', '', 450.0);
     insertCustomer.run('cust_5', 'Vikas Singh', '+91 93456 01234', 'vikas.singh@example.com', 'Royal Palms, Koramangala', 'House E-12', 'gold_cream', 1.0, 'Morning', 15, 'upi', 'vikas@ybl', 0.0);
 
-    // Seed recent delivery records for September 2026 up to today (Sep 26, 2026)
+    // Seed recent delivery records for September 2026 up to today (Sep 27, 2026)
     seedDeliveries();
   }
 }
@@ -157,8 +158,8 @@ function seedDeliveries() {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
   `);
 
-  // Dates: from 2026-09-01 to 2026-09-26
-  for (let day = 1; day <= 26; day++) {
+  // Dates: from 2026-09-01 to 2026-09-27
+  for (let day = 1; day <= 27; day++) {
     const dayStr = day < 10 ? `0${day}` : `${day}`;
     const dateStr = `2026-09-${dayStr}`;
 
@@ -166,9 +167,9 @@ function seedDeliveries() {
       const milk = milkMap[cust.default_milk_type_id] || milkTypes[0];
       const deliveryId = `del_${cust.id}_${dateStr}`;
 
-      // Simulate realistic scenarios:
+      // Realistic delivery logs:
       // Ramesh (House A-102): Delivered every day except on Sep 12 (absent)
-      // Sunita (House D-301): Absent on Sep 20 and today Sep 26 (Not at home)
+      // Sunita (House D-301): Absent on Sep 20 and Sep 26 (Not at home)
       // Amit (House C-105): Took 1.0L extra on Sep 15 (festival)
       let status = 'delivered';
       let qty = cust.default_quantity_liters;
@@ -181,7 +182,7 @@ function seedDeliveries() {
       } else if (cust.id === 'cust_4' && (day === 20 || day === 26)) {
         status = 'absent';
         qty = 0;
-        notes = day === 26 ? 'Not at home today - skipped' : 'Customer called to skip';
+        notes = day === 26 ? 'Not at home - skipped' : 'Customer called to skip';
       } else if (cust.id === 'cust_3' && day === 15) {
         status = 'delivered';
         qty = 1.0;
@@ -197,5 +198,6 @@ initDb();
 
 module.exports = {
   db,
-  initDb
+  initDb,
+  seedDeliveries
 };

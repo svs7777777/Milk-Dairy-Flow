@@ -114,7 +114,10 @@ Kindly clear your pending balance. Thank you! 🙏`;
 
   const openWhatsAppDirect = () => {
     if (!report) return;
-    const cleanPhone = report.customer.phone.replace(/[^0-9]/g, '');
+    let cleanPhone = report.customer.phone.replace(/[^0-9]/g, '');
+    if (cleanPhone.length === 10) {
+      cleanPhone = '91' + cleanPhone;
+    }
     const text = encodeURIComponent(generateWhatsAppMessage());
     window.open(`https://wa.me/${cleanPhone}?text=${text}`, '_blank');
   };

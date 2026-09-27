@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-const { db, initDb } = require('./db');
+const { db, initDb, seedDeliveries } = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -9,8 +9,17 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
-// Helper for generating IDs
+// Helper for generating unique IDs
 const generateId = (prefix) => `${prefix}_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+
+// Helper to get today's date in local YYYY-MM-DD
+function getTodayStr() {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
 
 // -------------------------------------------------------------
 // SETTINGS APIS
@@ -42,7 +51,7 @@ app.post('/api/settings', (req, res) => {
 });
 
 // -------------------------------------------------------------
-// MILK TYPES & PRICING APIS (Fluctuation & Rate management)
+// MILK TYPES & PRICING APIS (Rate fluctuations)
 // -------------------------------------------------------------
 app.get('/api/milk-types', (req, res) => {
   try {
@@ -216,7 +225,7 @@ app.delete('/api/customers/:id', (req, res) => {
 // -------------------------------------------------------------
 app.get('/api/deliveries/date/:date', (req, res) => {
   try {
-    const { date } = req.params; // Format: YYYY-MM-DD
+    const date = req.params.date || getTodayStr();
     const customers = db.prepare(`
       SELECT c.*, m.name as milk_type_name, m.price_per_liter as default_price
       FROM customers c
@@ -250,7 +259,8 @@ app.get('/api/deliveries/date/:date', (req, res) => {
           quantity_liters: recorded.quantity_liters,
           default_quantity: cust.default_quantity_liters,
           price_per_liter: recorded.price_per_liter,
-          status: recorded.status, // 'delivered', 'absent', 'pending'
+          preferred_payment_mode: cust.preferred_payment_mode,
+          status: recorded.status, // 'delivered', 'absent'
           notes: recorded.notes || '',
           is_recorded: true
         };
@@ -266,6 +276,7 @@ app.get('/api/deliveries/date/:date', (req, res) => {
           quantity_liters: cust.default_quantity_liters,
           default_quantity: cust.default_quantity_liters,
           price_per_liter: cust.milk_current_price,
+          preferred_payment_mode: cust.preferred_payment_mode,
           status: 'pending', // not checked yet today
           notes: '',
           is_recorded: false
@@ -279,7 +290,7 @@ app.get('/api/deliveries/date/:date', (req, res) => {
   }
 });
 
-// Single or batch save/toggle for delivery
+// Single save/toggle for delivery
 app.post('/api/deliveries/save', (req, res) => {
   try {
     const { customer_id, delivery_date, status, quantity_liters, milk_type_id, notes } = req.body;
@@ -316,11 +327,10 @@ app.post('/api/deliveries/save', (req, res) => {
   }
 });
 
-// Quick Mark All Pending as Delivered for a date
+// Quick Mark All Pending as Delivered for a date (preserves existing absent records!)
 app.post('/api/deliveries/mark-all-delivered', (req, res) => {
   try {
-    const { date } = req.body;
-    const targetDate = date || new Date().toISOString().split('T')[0];
+    const targetDate = req.body.date || getTodayStr();
     const customers = db.prepare(`
       SELECT c.*, m.price_per_liter
       FROM customers c
@@ -328,26 +338,32 @@ app.post('/api/deliveries/mark-all-delivered', (req, res) => {
       WHERE c.status = 'active'
     `).all();
 
+    // Check which customers already have a record for this date
+    const existing = db.prepare('SELECT customer_id FROM deliveries WHERE delivery_date = ?').all(targetDate);
+    const existingSet = new Set(existing.map(e => e.customer_id));
+
     const insertStmt = db.prepare(`
-      INSERT OR IGNORE INTO deliveries (id, customer_id, delivery_date, milk_type_id, quantity_liters, price_per_liter, status, notes, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, 'delivered', 'Standard delivery', datetime('now'))
+      INSERT INTO deliveries (id, customer_id, delivery_date, milk_type_id, quantity_liters, price_per_liter, status, notes, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, 'delivered', 'Standard delivery dispatch', datetime('now'))
     `);
 
     let markedCount = 0;
     customers.forEach(cust => {
-      const deliveryId = `del_${cust.id}_${targetDate}`;
-      const result = insertStmt.run(
-        deliveryId,
-        cust.id,
-        targetDate,
-        cust.default_milk_type_id,
-        cust.default_quantity_liters,
-        cust.price_per_liter || 60
-      );
-      if (result.changes > 0) markedCount++;
+      if (!existingSet.has(cust.id)) {
+        const deliveryId = `del_${cust.id}_${targetDate}`;
+        insertStmt.run(
+          deliveryId,
+          cust.id,
+          targetDate,
+          cust.default_milk_type_id,
+          cust.default_quantity_liters,
+          cust.price_per_liter || 60
+        );
+        markedCount++;
+      }
     });
 
-    res.json({ success: true, message: `Marked ${markedCount} customers as delivered for ${targetDate}` });
+    res.json({ success: true, message: `Marked ${markedCount} pending customers as delivered for ${targetDate}` });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -355,9 +371,11 @@ app.post('/api/deliveries/mark-all-delivered', (req, res) => {
 
 // -------------------------------------------------------------
 // BILLING ENGINE & CUSTOMER MONTHLY CALCULATION
-// Handles custom start date cycles (e.g. 26th Sep to 25th Oct) & 1st-to-30th
+// Robust calendar-based arithmetic handling arbitrary cycle start dates (e.g. 26th-to-26th)
 // -------------------------------------------------------------
-function calculateCustomerCycle(customerId, refDateStr = '2026-09-26') {
+function calculateCustomerCycle(customerId, refDateStr) {
+  const targetDateStr = refDateStr || getTodayStr();
+
   const cust = db.prepare(`
     SELECT c.*, m.name as milk_name, m.price_per_liter as default_rate
     FROM customers c
@@ -367,26 +385,35 @@ function calculateCustomerCycle(customerId, refDateStr = '2026-09-26') {
 
   if (!cust) return null;
 
-  const refDate = new Date(refDateStr);
+  const [refYear, refMonth, refDay] = targetDateStr.split('-').map(Number);
   const cycleDay = cust.billing_cycle_start_day || 1;
 
-  // Compute current cycle start and end dates
-  let cycleStartYear = refDate.getFullYear();
-  let cycleStartMonth = refDate.getMonth(); // 0-indexed
+  // Compute current cycle start and next billing date
+  let startYear = refYear;
+  let startMonth = refMonth;
 
-  if (refDate.getDate() < cycleDay) {
-    // Current cycle started in previous month
-    cycleStartMonth -= 1;
-    if (cycleStartMonth < 0) {
-      cycleStartMonth = 11;
-      cycleStartYear -= 1;
+  if (refDay < cycleDay) {
+    // Current cycle started in the preceding month
+    startMonth -= 1;
+    if (startMonth < 1) {
+      startMonth = 12;
+      startYear -= 1;
     }
   }
 
-  const cycleStartDate = new Date(cycleStartYear, cycleStartMonth, cycleDay);
-  // Cycle end is day before cycleDay of the next month
-  const cycleEndDate = new Date(cycleStartYear, cycleStartMonth + 1, cycleDay - 1);
-  const nextBillingDate = new Date(cycleStartYear, cycleStartMonth + 1, cycleDay);
+  // Next billing month and year
+  let nextBillingYear = startYear;
+  let nextBillingMonth = startMonth + 1;
+  if (nextBillingMonth > 12) {
+    nextBillingMonth = 1;
+    nextBillingYear += 1;
+  }
+
+  // Use local Date constructor for boundary calculation
+  const startDt = new Date(startYear, startMonth - 1, cycleDay);
+  const nextBillingDt = new Date(nextBillingYear, nextBillingMonth - 1, cycleDay);
+  // End date is exactly the day before the next billing date
+  const endDt = new Date(nextBillingYear, nextBillingMonth - 1, cycleDay - 1);
 
   const formatYMD = (d) => {
     const y = d.getFullYear();
@@ -395,9 +422,16 @@ function calculateCustomerCycle(customerId, refDateStr = '2026-09-26') {
     return `${y}-${m}-${day}`;
   };
 
-  const startStr = formatYMD(cycleStartDate);
-  const endStr = formatYMD(cycleEndDate);
-  const billingStr = formatYMD(nextBillingDate);
+  const startStr = formatYMD(startDt);
+  const endStr = formatYMD(endDt);
+  const billingStr = formatYMD(nextBillingDt);
+
+  // Compute exact days until next billing
+  const refDt = new Date(refYear, refMonth - 1, refDay);
+  const diffMs = nextBillingDt.getTime() - refDt.getTime();
+  const daysUntilBilling = Math.round(diffMs / (1000 * 60 * 60 * 24));
+  // 2-Day Advance Alert triggers when 0 to 2 days remain before cycle end!
+  const isAdvanceReminder = daysUntilBilling <= 2 && daysUntilBilling >= 0;
 
   // Fetch all delivery records for this customer in this cycle
   const deliveries = db.prepare(`
@@ -423,12 +457,7 @@ function calculateCustomerCycle(customerId, refDateStr = '2026-09-26') {
     }
   });
 
-  // Calculate days remaining in cycle and advance reminder
-  const diffTime = nextBillingDate.getTime() - refDate.getTime();
-  const daysUntilBilling = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-  const isAdvanceReminder = daysUntilBilling <= 2 && daysUntilBilling >= 0;
-
-  // Payments made during or against this cycle
+  // Payments recorded for this customer in this cycle
   const payments = db.prepare(`
     SELECT * FROM payments 
     WHERE customer_id = ? AND payment_date >= ?
@@ -447,7 +476,7 @@ function calculateCustomerCycle(customerId, refDateStr = '2026-09-26') {
       end_date: endStr,
       billing_date: billingStr,
       days_until_billing: daysUntilBilling,
-      is_advance_reminder: isAdvanceReminder, // 2 days before cycle popup!
+      is_advance_reminder: isAdvanceReminder, // 2 days before cycle popup
       is_billing_day_or_past: daysUntilBilling <= 0
     },
     consumption: {
@@ -471,7 +500,7 @@ function calculateCustomerCycle(customerId, refDateStr = '2026-09-26') {
 app.get('/api/customers/:id/report', (req, res) => {
   try {
     const { id } = req.params;
-    const refDate = req.query.date || '2026-09-26';
+    const refDate = req.query.date || getTodayStr();
     const report = calculateCustomerCycle(id, refDate);
     if (!report) return res.status(404).json({ success: false, error: 'Customer not found' });
     res.json({ success: true, data: report });
@@ -481,16 +510,14 @@ app.get('/api/customers/:id/report', (req, res) => {
 });
 
 // -------------------------------------------------------------
-// DUE ALERTS & 10TH OF MONTH / CYCLE REMINDERS
+// DUE ALERTS & 10TH OF MONTH / ADVANCE CYCLE REMINDERS
 // -------------------------------------------------------------
 app.get('/api/billing/due-alerts', (req, res) => {
   try {
-    const today = req.query.date || '2026-09-26';
-    const todayDate = new Date(today);
-    const dayOfMonth = todayDate.getDate();
+    const today = req.query.date || getTodayStr();
+    const [year, month, dayOfMonth] = today.split('-').map(Number);
 
     const customers = db.prepare("SELECT id FROM customers WHERE status = 'active'").all();
-    const alerts = [];
     const cycleEndingSoon = [];
     const pendingCollections = [];
 
@@ -512,7 +539,7 @@ app.get('/api/billing/due-alerts', (req, res) => {
           net_due: report.pricing.net_due,
           milk_name: report.customer.milk_name,
           preferred_payment_mode: report.customer.preferred_payment_mode,
-          message: `Cycle ends in ${report.cycle.days_until_billing} days (${report.cycle.billing_date}). Consumption: ${report.consumption.total_liters}L. Pending: ₹${report.pricing.net_due}`
+          message: `Cycle ends in ${report.cycle.days_until_billing} days (${report.cycle.billing_date}). Total Consumption: ${report.consumption.total_liters}L. Pending: ₹${report.pricing.net_due}`
         });
       }
 
@@ -550,8 +577,8 @@ app.get('/api/billing/due-alerts', (req, res) => {
 });
 
 // -------------------------------------------------------------
-// PAYMENTS & BALANCE ROLLOVER API
-// Supports partial payments: stores paid amount, updates remaining balance
+// PAYMENTS & PARTIAL BALANCE LEDGER
+// Pure double-entry payments: records payment, preserves exact accounting
 // -------------------------------------------------------------
 app.post('/api/payments', (req, res) => {
   try {
@@ -564,26 +591,25 @@ app.post('/api/payments', (req, res) => {
     if (!cust) return res.status(404).json({ success: false, error: 'Customer not found' });
 
     const payAmount = parseFloat(amount);
-    const payDate = payment_date || new Date().toISOString().split('T')[0];
+    const payDate = payment_date || getTodayStr();
     const payId = generateId('pay');
 
-    // Insert payment record
+    // Insert payment record into ledger
     db.prepare(`
       INSERT INTO payments (id, customer_id, payment_date, amount, payment_mode, transaction_ref, notes, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
     `).run(payId, customer_id, payDate, payAmount, payment_mode || 'cash', transaction_ref || '', notes || '');
 
-    // Deduct from customer's outstanding balance
-    // If balance was ₹1800 and customer paid ₹1000, new balance is ₹800 (carried to next bill)
-    const newBalance = Math.max(0, (cust.outstanding_balance || 0) - payAmount);
-    db.prepare('UPDATE customers SET outstanding_balance = ? WHERE id = ?').run(newBalance, customer_id);
+    // Recompute current report to return exact net due
+    const updated = calculateCustomerCycle(customer_id, payDate);
 
     res.json({
       success: true,
       message: `Payment of ₹${payAmount} recorded successfully!`,
-      previous_balance: cust.outstanding_balance,
       amount_paid: payAmount,
-      remaining_balance: newBalance
+      total_payable: updated ? updated.pricing.total_payable : 0,
+      total_paid_so_far: updated ? updated.pricing.amount_paid : payAmount,
+      remaining_balance: updated ? updated.pricing.net_due : 0
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -601,18 +627,17 @@ app.get('/api/payments/customer/:id', (req, res) => {
 });
 
 // -------------------------------------------------------------
-// AUTHENTICATION & OTP (Email & Mobile OTP Flow + Google Simulator)
+// AUTHENTICATION & OTP
 // -------------------------------------------------------------
 app.post('/api/auth/send-otp', (req, res) => {
   try {
-    const { identifier, role } = req.body; // identifier can be email or phone
+    const { identifier, role } = req.body;
     if (!identifier) {
       return res.status(400).json({ success: false, error: 'Email or Mobile number is required' });
     }
 
-    // Generate 6-digit realistic OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 minutes expiry
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
     const sessionId = generateId('otp');
 
     db.prepare(`
@@ -620,14 +645,11 @@ app.post('/api/auth/send-otp', (req, res) => {
       VALUES (?, ?, ?, ?, ?, 0)
     `).run(sessionId, identifier, otp, role || 'admin', expiresAt);
 
-    // In production, nodemailer / Twilio / MSG91 sends SMS/email here.
-    // For local instant preview and testing, we return the demo OTP directly in the response
-    // so the user can easily copy/test it right away!
     res.json({
       success: true,
       message: `OTP sent successfully to ${identifier}`,
       sessionId,
-      demo_otp: otp, // For rapid testing & verification!
+      demo_otp: otp,
       expires_in: '10 minutes'
     });
   } catch (err) {
@@ -642,7 +664,6 @@ app.post('/api/auth/verify-otp', (req, res) => {
       return res.status(400).json({ success: false, error: 'Identifier and OTP code are required' });
     }
 
-    // Allow master test code 123456 or real generated OTP
     const session = db.prepare(`
       SELECT * FROM otp_sessions 
       WHERE identifier = ? AND (otp_code = ? OR ? = '123456')
@@ -654,8 +675,6 @@ app.post('/api/auth/verify-otp', (req, res) => {
     }
 
     db.prepare('UPDATE otp_sessions SET verified = 1 WHERE id = ?').run(session.id);
-
-    // If identifier matches customer phone or email, retrieve customer profile
     const customer = db.prepare('SELECT * FROM customers WHERE phone = ? OR email = ?').get(identifier, identifier);
 
     res.json({
@@ -680,7 +699,7 @@ app.post('/api/auth/verify-otp', (req, res) => {
 // -------------------------------------------------------------
 app.get('/api/dashboard/stats', (req, res) => {
   try {
-    const today = req.query.date || '2026-09-26';
+    const today = req.query.date || getTodayStr();
     const totalCustomers = db.prepare("SELECT COUNT(*) as count FROM customers WHERE status = 'active'").get().count;
 
     const todayDeliveries = db.prepare(`
@@ -693,8 +712,7 @@ app.get('/api/dashboard/stats', (req, res) => {
       WHERE delivery_date = ?
     `).get(today);
 
-    // Month to date stats
-    const currentMonthPrefix = today.substring(0, 7); // e.g. "2026-09"
+    const currentMonthPrefix = today.substring(0, 7);
     const monthDeliveries = db.prepare(`
       SELECT 
         COALESCE(SUM(CASE WHEN status = 'delivered' THEN quantity_liters ELSE 0 END), 0) as month_liters,

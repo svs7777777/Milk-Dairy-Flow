@@ -14,12 +14,21 @@ import DueAlertsBanner from './components/DueAlertsBanner';
 import AuthModal from './components/AuthModal';
 import CustomerPortal from './components/CustomerPortal';
 
+// Helper to get local date YYYY-MM-DD
+function getTodayStr() {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 export default function App() {
   const [viewMode, setViewMode] = useState('admin'); // 'admin' or 'customer'
   const [activeTab, setActiveTab] = useState('daily'); // 'daily', 'customers'
   
-  // Date state: Default to 2026-09-26
-  const [selectedDate, setSelectedDate] = useState('2026-09-26');
+  // Date state: Default dynamically to today (e.g. 2026-09-27)
+  const [selectedDate, setSelectedDate] = useState(getTodayStr());
 
   // Core Data State
   const [checklist, setChecklist] = useState([]);

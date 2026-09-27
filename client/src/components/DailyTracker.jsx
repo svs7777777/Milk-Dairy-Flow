@@ -3,8 +3,26 @@ import {
   Check, X, Plus, Minus, Search, Calendar, 
   MapPin, Phone, Droplets, CheckCircle2, 
   AlertCircle, ChevronRight, FileText, CheckCheck,
-  TrendingUp, CreditCard, Banknote
+  TrendingUp, CreditCard, Banknote, Sparkles
 } from 'lucide-react';
+
+// Helper to shift a YYYY-MM-DD date by N days without UTC timezone skew
+function shiftDate(dateStr, days) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(y, m - 1, d + days);
+  const year = dt.getFullYear();
+  const month = String(dt.getMonth() + 1).padStart(2, '0');
+  const day = String(dt.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function getTodayStr() {
+  const dt = new Date();
+  const year = dt.getFullYear();
+  const month = String(dt.getMonth() + 1).padStart(2, '0');
+  const day = String(dt.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
 
 export default function DailyTracker({
   checklist,
@@ -41,15 +59,15 @@ export default function DailyTracker({
     .filter(i => i.status === 'delivered')
     .reduce((sum, i) => sum + (parseFloat(i.quantity_liters) || 0), 0);
 
-  // Quick 1-click Delivered
-  const handleDeliverStandard = (item) => {
+  // Quick 1-click Delivered with specified liters
+  const handleDeliverExact = (item, qty, label = 'Delivered') => {
     onUpdateDelivery({
       customer_id: item.customer_id,
       delivery_date: selectedDate,
       status: 'delivered',
-      quantity_liters: item.default_quantity,
+      quantity_liters: qty,
       milk_type_id: item.milk_type_id,
-      notes: 'Delivered standard quota'
+      notes: `${label} (${qty}L)`
     });
   };
 
@@ -103,15 +121,12 @@ export default function DailyTracker({
             </p>
           </div>
 
-          {/* Date Picker Control */}
+          {/* Date Picker Control - Timezone Safe */}
           <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-xl border border-slate-200">
             <button
-              onClick={() => {
-                const prev = new Date(selectedDate);
-                prev.setDate(prev.getDate() - 1);
-                setSelectedDate(prev.toISOString().split('T')[0]);
-              }}
+              onClick={() => setSelectedDate(shiftDate(selectedDate, -1))}
               className="px-2.5 py-1.5 rounded-lg bg-white shadow-xs text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors"
+              title="Previous Day"
             >
               ← Prev
             </button>
@@ -124,18 +139,15 @@ export default function DailyTracker({
             />
 
             <button
-              onClick={() => {
-                const next = new Date(selectedDate);
-                next.setDate(next.getDate() + 1);
-                setSelectedDate(next.toISOString().split('T')[0]);
-              }}
+              onClick={() => setSelectedDate(shiftDate(selectedDate, 1))}
               className="px-2.5 py-1.5 rounded-lg bg-white shadow-xs text-xs font-semibold text-slate-700 hover:bg-slate-100 transition-colors"
+              title="Next Day"
             >
               Next →
             </button>
 
             <button
-              onClick={() => setSelectedDate(new Date().toISOString().split('T')[0])}
+              onClick={() => setSelectedDate(getTodayStr())}
               className="px-2.5 py-1.5 rounded-lg bg-teal-50 text-teal-700 border border-teal-200 text-xs font-bold hover:bg-teal-100 transition-colors"
             >
               Today
@@ -271,6 +283,16 @@ export default function DailyTracker({
                     <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
                       <Phone className="w-3 h-3 text-slate-400" />
                       <span>{item.phone}</span>
+                      <span className="text-slate-300">|</span>
+                      {/* Preferred Payment Mode Badge */}
+                      <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                        item.preferred_payment_mode === 'upi'
+                          ? 'bg-purple-50 text-purple-700 border border-purple-200'
+                          : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                      }`}>
+                        {item.preferred_payment_mode === 'upi' ? <CreditCard className="w-3 h-3" /> : <Banknote className="w-3 h-3" />}
+                        <span className="uppercase">{item.preferred_payment_mode || 'Cash'}</span>
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -304,51 +326,64 @@ export default function DailyTracker({
                   <Droplets className="w-3.5 h-3.5 text-teal-600" />
                   <span className="font-semibold">{item.milk_type_name}</span>
                   <span className="text-slate-400">|</span>
-                  <span className="text-slate-500">Standard: <strong>{item.default_quantity}L</strong></span>
+                  <span className="text-slate-500">Default: <strong>{item.default_quantity}L</strong></span>
                 </div>
 
                 <div className="text-xs font-bold text-slate-600">
-                  Rate: ₹{item.price_per_liter}/L
+                  ₹{item.price_per_liter}/L
                 </div>
               </div>
 
-              {/* Delivery Action Buttons: Fast 60fps 1-touch for mobile */}
-              <div className="grid grid-cols-3 gap-2 mt-3 pt-1">
-                {/* 1. Delivered Button */}
+              {/* Quick Delivery Action Buttons (60 FPS Fast Touch) */}
+              <div className="grid grid-cols-4 gap-1.5 mt-3 pt-1">
+                {/* 1. Default Standard Quota */}
                 <button
-                  onClick={() => handleDeliverStandard(item)}
-                  className={`flex items-center justify-center gap-1 py-2 px-2 rounded-xl text-xs font-bold tap-bounce transition-all ${
-                    isDelivered
+                  onClick={() => handleDeliverExact(item, item.default_quantity, 'Standard')}
+                  className={`flex items-center justify-center gap-1 py-2 px-1.5 rounded-xl text-xs font-bold tap-bounce transition-all ${
+                    isDelivered && item.quantity_liters === item.default_quantity
                       ? 'bg-teal-600 text-white shadow-xs'
                       : 'bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200/80'
                   }`}
-                  title="Mark standard daily quota delivered"
+                  title={`Deliver standard ${item.default_quantity}L`}
                 >
-                  <Check className="w-4 h-4 stroke-[2.5]" />
-                  <span>{item.default_quantity}L Yes</span>
+                  <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                  <span>{item.default_quantity}L</span>
                 </button>
 
-                {/* 2. Absent / Not At Home Button */}
+                {/* 2. Quick 500 ml (0.5 L) */}
+                <button
+                  onClick={() => handleDeliverExact(item, 0.5, '500 ml')}
+                  className={`flex items-center justify-center gap-0.5 py-2 px-1 rounded-xl text-xs font-bold tap-bounce transition-all ${
+                    isDelivered && item.quantity_liters === 0.5
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
+                  }`}
+                  title="Deliver 500 ml (0.5 Liter)"
+                >
+                  <span>500ml</span>
+                </button>
+
+                {/* 3. Quick Absent (0L) */}
                 <button
                   onClick={() => handleMarkAbsent(item)}
-                  className={`flex items-center justify-center gap-1 py-2 px-2 rounded-xl text-xs font-bold tap-bounce transition-all ${
+                  className={`flex items-center justify-center gap-1 py-2 px-1.5 rounded-xl text-xs font-bold tap-bounce transition-all ${
                     isAbsent
                       ? 'bg-rose-600 text-white shadow-xs'
                       : 'bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200/80'
                   }`}
                   title="Mark customer not at home / 0 Liters"
                 >
-                  <X className="w-4 h-4 stroke-[2.5]" />
-                  <span>Absent (0L)</span>
+                  <X className="w-3.5 h-3.5 stroke-[2.5]" />
+                  <span>Absent</span>
                 </button>
 
-                {/* 3. Custom Qty / Huge Order Button */}
+                {/* 4. Custom / Huge Order Button */}
                 <button
                   onClick={() => openCustomModal(item)}
-                  className="flex items-center justify-center gap-1 py-2 px-2 rounded-xl text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 tap-bounce transition-all"
-                  title="Specify custom amount or huge order (e.g. 500ml, 1.5L, 5L)"
+                  className="flex items-center justify-center gap-1 py-2 px-1 rounded-xl text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 tap-bounce transition-all"
+                  title="Specify custom amount (1.5L, 2L, huge orders)"
                 >
-                  <span>Custom Qty</span>
+                  <span>Custom</span>
                 </button>
               </div>
 
@@ -377,7 +412,7 @@ export default function DailyTracker({
         </div>
       )}
 
-      {/* STICKY BOTTOM CHECKLIST BAR (Mobile & Desktop 60fps Experience) */}
+      {/* STICKY BOTTOM CHECKLIST BAR (Mobile & Desktop 60 FPS Experience) */}
       <div className="fixed bottom-0 left-0 right-0 z-30 bg-slate-900/95 backdrop-blur-md text-white border-t border-slate-800 shadow-sticky-bar px-4 py-3 sm:py-3.5 transition-all">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
           
@@ -386,7 +421,7 @@ export default function DailyTracker({
             <div className="flex items-center gap-2">
               <span className="h-2.5 w-2.5 rounded-full bg-teal-400 animate-pulse"></span>
               <span className="font-medium text-slate-300">
-                Today ({selectedDate}):
+                Date ({selectedDate}):
               </span>
               <span className="font-extrabold text-teal-300">
                 {deliveredCount} / {checklist.length} Delivered
@@ -418,7 +453,7 @@ export default function DailyTracker({
             )}
 
             <button
-              onClick={() => setSelectedDate(new Date().toISOString().split('T')[0])}
+              onClick={() => setSelectedDate(getTodayStr())}
               className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold tap-bounce"
             >
               Reset to Today
