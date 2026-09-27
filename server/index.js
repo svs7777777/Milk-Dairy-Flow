@@ -231,7 +231,7 @@ app.get('/api/deliveries/date/:date', (req, res) => {
       FROM customers c
       LEFT JOIN milk_types m ON c.default_milk_type_id = m.id
       WHERE c.status = 'active'
-      ORDER BY c.house_no ASC, c.name ASC
+      ORDER BY c.society ASC, c.house_no ASC
     `).all();
 
     const existingDeliveries = db.prepare(`
@@ -253,6 +253,7 @@ app.get('/api/deliveries/date/:date', (req, res) => {
           customer_name: cust.name,
           phone: cust.phone,
           house_no: cust.house_no,
+          society: cust.society || 'General',
           address: cust.address,
           milk_type_id: recorded.milk_type_id,
           milk_type_name: recorded.milk_name || cust.milk_type_name,
@@ -270,6 +271,7 @@ app.get('/api/deliveries/date/:date', (req, res) => {
           customer_name: cust.name,
           phone: cust.phone,
           house_no: cust.house_no,
+          society: cust.society || 'General',
           address: cust.address,
           milk_type_id: cust.default_milk_type_id,
           milk_type_name: cust.milk_type_name,
@@ -627,8 +629,78 @@ app.get('/api/payments/customer/:id', (req, res) => {
 });
 
 // -------------------------------------------------------------
-// AUTHENTICATION & OTP
+// AUTHENTICATION & MULTI-ADMIN APIS
 // -------------------------------------------------------------
+// Admin Username & Password Login (e.g. admin1 / Dairy@2026)
+app.post('/api/auth/admin-login', (req, res) => {
+  try {
+    const { username, password } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ success: false, error: 'Username and password are required' });
+    }
+
+    const admin = db.prepare(`
+      SELECT * FROM admins 
+      WHERE (username = ? OR email = ?) AND password_hash = ?
+    `).get(username.trim(), username.trim(), password);
+
+    if (!admin) {
+      return res.status(401).json({ success: false, error: 'Invalid admin credentials. Please check username or password.' });
+    }
+
+    res.json({
+      success: true,
+      message: 'Admin authentication successful',
+      token: `admin_token_${admin.id}_${Date.now()}`,
+      user: {
+        id: admin.id,
+        username: admin.username,
+        name: admin.name,
+        role: admin.role || 'admin',
+        email: admin.email,
+        phone: admin.phone
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// List all registered admins (Multi-Admin management)
+app.get('/api/auth/admins', (req, res) => {
+  try {
+    const admins = db.prepare('SELECT id, username, email, name, role, phone, created_at FROM admins').all();
+    res.json({ success: true, data: admins });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Create new admin (Admin 2, Admin 3, etc.)
+app.post('/api/auth/admins', (req, res) => {
+  try {
+    const { username, password, name, email, phone, role } = req.body;
+    if (!username || !password || !name) {
+      return res.status(400).json({ success: false, error: 'Username, password and name are required' });
+    }
+
+    const existing = db.prepare('SELECT id FROM admins WHERE username = ?').get(username);
+    if (existing) {
+      return res.status(400).json({ success: false, error: 'Admin username already exists' });
+    }
+
+    const id = generateId('admin');
+    db.prepare(`
+      INSERT INTO admins (id, username, email, password_hash, name, role, phone, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    `).run(id, username.trim(), email || '', password, name, role || 'admin', phone || '');
+
+    res.json({ success: true, message: `Admin account '${name}' created successfully!`, id });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.post('/api/auth/send-otp', (req, res) => {
   try {
     const { identifier, role } = req.body;
@@ -681,10 +753,10 @@ app.post('/api/auth/verify-otp', (req, res) => {
       success: true,
       message: 'Authentication successful',
       token: `token_${Date.now()}`,
-      role: session.role || 'admin',
+      role: session.role || 'customer',
       user: {
         identifier,
-        role: session.role || 'admin',
+        role: session.role || (customer ? 'customer' : 'admin'),
         customerId: customer ? customer.id : null,
         name: customer ? customer.name : (session.role === 'admin' ? 'Dairy Administrator' : 'Valued Customer')
       }

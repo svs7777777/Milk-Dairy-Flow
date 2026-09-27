@@ -131,6 +131,26 @@ export const api = {
   },
 
   // Auth & OTP
+  adminLogin: async (username, password) => {
+    const res = await fetch(`${API_BASE}/auth/admin-login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    return res.json();
+  },
+  getAdmins: async () => {
+    const res = await fetch(`${API_BASE}/auth/admins`);
+    return res.json();
+  },
+  createAdmin: async (adminData) => {
+    const res = await fetch(`${API_BASE}/auth/admins`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(adminData)
+    });
+    return res.json();
+  },
   sendOtp: async (identifier, role = 'admin') => {
     const res = await fetch(`${API_BASE}/auth/send-otp`, {
       method: 'POST',

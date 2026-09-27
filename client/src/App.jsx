@@ -11,8 +11,9 @@ import CustomerList from './components/CustomerList';
 import BillingModal from './components/BillingModal';
 import MilkRatesModal from './components/MilkRatesModal';
 import DueAlertsBanner from './components/DueAlertsBanner';
-import AuthModal from './components/AuthModal';
 import CustomerPortal from './components/CustomerPortal';
+import LoginPage from './components/LoginPage';
+import AdminManagementModal from './components/AdminManagementModal';
 
 // Helper to get local date YYYY-MM-DD
 function getTodayStr() {
@@ -24,10 +25,21 @@ function getTodayStr() {
 }
 
 export default function App() {
-  const [viewMode, setViewMode] = useState('admin'); // 'admin' or 'customer'
-  const [activeTab, setActiveTab] = useState('daily'); // 'daily', 'customers'
+  // Current logged in user (Admin 1 or Customer)
+  const [currentUser, setCurrentUser] = useState(() => {
+    try {
+      const saved = localStorage.getItem('dairy_flow_session');
+      return saved ? JSON.parse(saved) : null;
+    } catch (e) {
+      return null;
+    }
+  });
+
+  const [viewMode, setViewMode] = useState(() => {
+    return currentUser?.role === 'customer' ? 'customer' : 'admin';
+  });
   
-  // Date state: Default dynamically to today (e.g. 2026-09-27)
+  const [activeTab, setActiveTab] = useState('daily'); // 'daily', 'customers'
   const [selectedDate, setSelectedDate] = useState(getTodayStr());
 
   // Core Data State
@@ -42,15 +54,8 @@ export default function App() {
   const [selectedCustomerIdForBill, setSelectedCustomerIdForBill] = useState(null);
   const [showRatesModal, setShowRatesModal] = useState(false);
   const [showAlertsModal, setShowAlertsModal] = useState(false);
-  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [showAdminManagerModal, setShowAdminManagerModal] = useState(false);
   const [dismissAdvanceBanner, setDismissAdvanceBanner] = useState(false);
-
-  // Auth User
-  const [currentUser, setCurrentUser] = useState({
-    identifier: 'admin@amritdairy.com',
-    role: 'admin',
-    name: 'Dairy Administrator'
-  });
 
   // Initial Load
   const loadAllData = async () => {
@@ -78,6 +83,7 @@ export default function App() {
 
   // Reload when date changes
   useEffect(() => {
+    if (!currentUser) return;
     const refreshDeliveries = async () => {
       try {
         const [delivRes, statsRes, alertsRes] = await Promise.all([
@@ -93,16 +99,18 @@ export default function App() {
       }
     };
     refreshDeliveries();
-  }, [selectedDate]);
+  }, [selectedDate, currentUser]);
 
   useEffect(() => {
-    loadAllData();
-  }, []);
+    if (currentUser) {
+      loadAllData();
+    }
+  }, [currentUser]);
 
   // Delivery update handler
   const handleUpdateDelivery = async (deliveryPayload) => {
     try {
-      // Optimistic UI update for snappy 60fps response
+      // Snappy optimistic UI update
       setChecklist(prev => prev.map(item => {
         if (item.customer_id === deliveryPayload.customer_id) {
           return {
@@ -118,7 +126,6 @@ export default function App() {
 
       await api.saveDelivery(deliveryPayload);
       
-      // Refresh stats & alerts in background
       const [statsRes, alertsRes] = await Promise.all([
         api.getDashboardStats(selectedDate),
         api.getDueAlerts(selectedDate)
@@ -127,11 +134,11 @@ export default function App() {
       if (alertsRes.success) setDueAlerts(alertsRes);
     } catch (err) {
       alert('Error updating delivery: ' + err.message);
-      loadAllData(); // revert
+      loadAllData();
     }
   };
 
-  // Mark all delivered
+  // Mark all remaining delivered
   const handleMarkAllDelivered = async (dateStr) => {
     try {
       await api.markAllDelivered(dateStr);
@@ -172,6 +179,27 @@ export default function App() {
     }
   };
 
+  const handleLogout = () => {
+    localStorage.removeItem('dairy_flow_session');
+    setCurrentUser(null);
+  };
+
+  // MANDATORY LOGIN GATE: If not authenticated, render LoginPage directly!
+  if (!currentUser) {
+    return (
+      <LoginPage
+        onLoginSuccess={(user) => {
+          setCurrentUser(user);
+          if (user.role === 'customer') {
+            setViewMode('customer');
+          } else {
+            setViewMode('admin');
+          }
+        }}
+      />
+    );
+  }
+
   const alertBadgeCount = (dueAlerts?.cycle_ending_soon?.length || 0) + (dueAlerts?.pending_collections?.length || 0);
 
   return (
@@ -185,10 +213,10 @@ export default function App() {
         milkTypes={milkTypes}
         onOpenRates={() => setShowRatesModal(true)}
         onOpenAlerts={() => setShowAlertsModal(true)}
+        onOpenAdminManager={() => setShowAdminManagerModal(true)}
         alertCount={alertBadgeCount}
         user={currentUser}
-        onOpenAuth={() => setShowAuthModal(true)}
-        onLogout={() => setCurrentUser(null)}
+        onLogout={handleLogout}
       />
 
       {/* ADVANCE 2-DAY BILLING CYCLE POP-UP BANNER */}
@@ -260,14 +288,24 @@ export default function App() {
                 </button>
               </div>
 
-              {/* Milk Rates shortcut */}
-              <button
-                onClick={() => setShowRatesModal(true)}
-                className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700 transition-colors shadow-xs"
-              >
-                <Droplets className="w-4 h-4 text-teal-600" />
-                <span>Adjust Milk Prices</span>
-              </button>
+              {/* Milk Rates & Admins shortcut */}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowAdminManagerModal(true)}
+                  className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700 transition-colors shadow-xs"
+                >
+                  <Shield className="w-4 h-4 text-teal-600" />
+                  <span>Manage Admins</span>
+                </button>
+
+                <button
+                  onClick={() => setShowRatesModal(true)}
+                  className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700 transition-colors shadow-xs"
+                >
+                  <Droplets className="w-4 h-4 text-teal-600" />
+                  <span>Adjust Milk Prices</span>
+                </button>
+              </div>
             </div>
 
             {/* TAB 1: DAILY DELIVERY TRACKER */}
@@ -341,17 +379,9 @@ export default function App() {
         />
       )}
 
-      {showAuthModal && (
-        <AuthModal
-          onClose={() => setShowAuthModal(false)}
-          onLoginSuccess={(user) => {
-            setCurrentUser(user);
-            if (user.role === 'customer') {
-              setViewMode('customer');
-            } else {
-              setViewMode('admin');
-            }
-          }}
+      {showAdminManagerModal && (
+        <AdminManagementModal
+          onClose={() => setShowAdminManagerModal(false)}
         />
       )}
 

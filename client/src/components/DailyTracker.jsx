@@ -36,20 +36,25 @@ export default function DailyTracker({
 }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('all'); // all, delivered, absent, pending
+  const [filterSociety, setFilterSociety] = useState('all'); // all or specific society
   const [customQtyModal, setCustomQtyModal] = useState(null); // customer item when editing custom qty
   const [customLiters, setCustomLiters] = useState(1.0);
   const [customNote, setCustomNote] = useState('');
 
-  // Filter checklist by search and status
+  const societies = Array.from(new Set(checklist.map(i => i.society).filter(Boolean)));
+
+  // Filter checklist by search, status, and society
   const filteredList = checklist.filter((item) => {
     const matchSearch = 
       item.customer_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (item.house_no && item.house_no.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (item.society && item.society.toLowerCase().includes(searchTerm.toLowerCase())) ||
       item.phone.includes(searchTerm);
 
     if (!matchSearch) return false;
-    if (filterStatus === 'all') return true;
-    return item.status === filterStatus;
+    if (filterStatus !== 'all' && item.status !== filterStatus) return false;
+    if (filterSociety !== 'all' && item.society !== filterSociety) return false;
+    return true;
   });
 
   const deliveredCount = checklist.filter(i => i.status === 'delivered').length;
@@ -240,6 +245,36 @@ export default function DailyTracker({
         </div>
       </div>
 
+      {/* Society Quick Filter Bar */}
+      {societies.length > 0 && (
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-2 mb-4 text-xs">
+          <span className="font-bold text-slate-400 uppercase text-[10px] tracking-wider px-1">Society:</span>
+          <button
+            onClick={() => setFilterSociety('all')}
+            className={`px-2.5 py-1 rounded-lg font-bold transition-all whitespace-nowrap ${
+              filterSociety === 'all'
+                ? 'bg-teal-600 text-white shadow-xs'
+                : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+            }`}
+          >
+            All Societies
+          </button>
+          {societies.map((soc) => (
+            <button
+              key={soc}
+              onClick={() => setFilterSociety(soc)}
+              className={`px-2.5 py-1 rounded-lg font-bold transition-all whitespace-nowrap ${
+                filterSociety === soc
+                  ? 'bg-teal-600 text-white shadow-xs'
+                  : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+              }`}
+            >
+              {soc}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Customer Delivery Cards List */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
         {filteredList.map((item) => {
@@ -258,23 +293,29 @@ export default function DailyTracker({
                   : 'border-slate-200/80 hover:border-slate-300'
               }`}
             >
-              {/* Header row: House No, Name, and Status Badge */}
+              {/* Header row: House No, Society, Name, and Status Badge */}
               <div className="flex items-start justify-between gap-3">
                 <div className="flex items-start gap-2.5">
                   <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 ${
-                    item.house_no?.includes('A') ? 'bg-indigo-50 text-indigo-700 border border-indigo-200' :
-                    item.house_no?.includes('B') ? 'bg-sky-50 text-sky-700 border border-sky-200' :
-                    item.house_no?.includes('C') ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
-                    item.house_no?.includes('D') ? 'bg-amber-50 text-amber-700 border border-amber-200' :
+                    item.society?.includes('Safar') ? 'bg-indigo-50 text-indigo-700 border border-indigo-200' :
+                    item.society?.includes('Oscar') ? 'bg-sky-50 text-sky-700 border border-sky-200' :
+                    item.society?.includes('Palav') ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
+                    item.society?.includes('Sarita') ? 'bg-amber-50 text-amber-700 border border-amber-200' :
+                    item.society?.includes('Dwarika') ? 'bg-purple-50 text-purple-700 border border-purple-200' :
                     'bg-teal-50 text-teal-700 border border-teal-200'
                   }`}>
-                    {item.house_no ? item.house_no.split('-')[0] : 'HM'}
+                    {item.house_no ? item.house_no.replace(/[^0-9A-Za-z]/g, '').substring(0, 3) : 'HM'}
                   </div>
                   <div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       <span className="font-extrabold text-slate-900 text-base">
                         {item.house_no || 'House'}
                       </span>
+                      {item.society && (
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200">
+                          {item.society}
+                        </span>
+                      )}
                       <span className="text-slate-400">•</span>
                       <span className="font-semibold text-slate-800 text-sm">
                         {item.customer_name}
