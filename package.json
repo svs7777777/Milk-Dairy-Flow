@@ -1,0 +1,29 @@
+{
+  "name": "dairy-flow",
+  "version": "1.0.0",
+  "description": "High-Performance Milk Delivery & Customer Management System",
+  "main": "server/index.js",
+  "scripts": {
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "server": "node server/index.js",
+    "client": "npm run dev --prefix client",
+    "build": "npm run build --prefix client",
+    "start": "node server/index.js"
+  },
+  "keywords": [
+    "milk-management",
+    "dairy",
+    "delivery-tracker",
+    "billing"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "cors": "^2.8.5",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
