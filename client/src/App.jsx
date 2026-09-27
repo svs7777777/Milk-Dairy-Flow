@@ -382,6 +382,10 @@ export default function App() {
       {showAdminManagerModal && (
         <AdminManagementModal
           onClose={() => setShowAdminManagerModal(false)}
+          onAdminUpdated={(updatedAdmin) => {
+            setCurrentUser(updatedAdmin);
+            loadAllData();
+          }}
         />
       )}
 

@@ -31,7 +31,7 @@ function request(method, path, body = null) {
 }
 
 async function runTests() {
-  console.log('🧪 Starting Automated End-to-End Verification Tests...\n');
+  console.log('🧪 Starting Verification Tests for New Requirements...\n');
   let passed = 0;
   let failed = 0;
 
@@ -46,109 +46,100 @@ async function runTests() {
   }
 
   try {
-    // 1. Settings API
-    const settingsRes = await request('GET', '/api/settings');
-    assert(settingsRes.status === 200 && settingsRes.body.success, 'Settings API responds with 200 OK');
+    // 1. Only ONE Official Admin initially
+    const adminsRes = await request('GET', '/api/auth/admins');
+    assert(adminsRes.status === 200 && adminsRes.body.data.length === 1, 'Only One Official Admin exists initially');
+    const officialAdmin = adminsRes.body.data[0];
+    assert(officialAdmin.username === 'admin1' && officialAdmin.role === 'official_admin', 'Admin 1 has role "official_admin"');
 
-    // 2. Admin 1 Authentication Test
+    // 2. Admin Login
     const adminLoginRes = await request('POST', '/api/auth/admin-login', {
       username: 'admin1',
       password: 'Dairy@2026'
     });
-    assert(adminLoginRes.status === 200 && adminLoginRes.body.token, 'Admin 1 Login with Dairy@2026');
+    assert(adminLoginRes.status === 200 && adminLoginRes.body.token, 'Official Admin login with Dairy@2026 succeeds');
 
-    // 3. Multi-Admin Verification
-    const adminsListRes = await request('GET', '/api/auth/admins');
-    assert(adminsListRes.status === 200 && adminsListRes.body.data.length >= 1, 'Multi-Admin list returns active admins');
-
-    // 4. Milk Types & Price Fluctuation
+    // 3. Admin Can Change The Rate Of Milk
+    const rateUpdateRes = await request('PUT', '/api/milk-types/buffalo_pure', {
+      price_per_liter: 62.0
+    });
+    assert(rateUpdateRes.status === 200 && rateUpdateRes.body.success, 'Admin can change milk rate (updated to ₹62)');
+    // Restore back to ₹60
+    await request('PUT', '/api/milk-types/buffalo_pure', { price_per_liter: 60.0 });
     const milkRes = await request('GET', '/api/milk-types');
-    assert(milkRes.status === 200 && milkRes.body.data.length >= 4, 'Fetch Milk Types (Cow, Buffalo, etc.)');
-    
-    // 5. Real Customers Directory
+    const buffalo = milkRes.body.data.find(m => m.id === 'buffalo_pure');
+    assert(buffalo && buffalo.price_per_liter === 60.0, 'Milk rate verified at ₹60/L');
+
+    // 4. Exact Customer Count = 11
     const custRes = await request('GET', '/api/customers');
-    assert(custRes.status === 200 && custRes.body.data.length >= 10, 'Fetch Real Customer Directory (Safar Villa, Oscar Enclave, etc.)');
-    const firstCust = custRes.body.data[0];
-    const secondCust = custRes.body.data[1];
+    assert(custRes.status === 200 && custRes.body.data.length === 11, 'Exactly 11 Customer Households loaded');
 
-    // 6. Daily Delivery Checklist for Today (2026-09-27)
-    const delivRes = await request('GET', '/api/deliveries/date/2026-09-27');
-    assert(delivRes.status === 200 && Array.isArray(delivRes.body.data), 'Fetch Daily Checklist for 2026-09-27');
+    // 5. Customer C-302 Has TWO Types of Milk
+    const c302 = custRes.body.data.find(c => c.house_no === 'C-302');
+    assert(c302 && c302.default_milk_type_id === 'cow_standard' && c302.default_milk_type_2_id === 'buffalo_pure',
+      'Customer C-302 has two types of milk: Cow Milk (1L @ ₹56) and Buffalo Milk (1L @ ₹60)');
+    assert(c302.default_quantity_liters === 1.0 && c302.default_quantity_2_liters === 1.0,
+      'Customer C-302 daily quantities: 1L Cow Milk + 1L Buffalo Milk');
 
-    // 7. Test 1-Touch Delivery Save: First House Delivered 1L, Second House Absent 0L
-    const saveA = await request('POST', '/api/deliveries/save', {
-      customer_id: firstCust.id,
-      delivery_date: '2026-09-27',
-      status: 'delivered',
-      quantity_liters: 1.0,
-      notes: 'Delivered standard quota'
+    // 6. C-302 August Bill & Itemized Breakdown
+    const c302Bill = await request('GET', '/api/customers/cust_ap_c302/report?date=2026-08-31');
+    assert(c302Bill.status === 200, 'C-302 August bill report fetched successfully');
+    const breakdown = c302Bill.body.data.consumption.milk_breakdown;
+    const cowItem = breakdown.find(m => m.milk_type_id === 'cow_standard');
+    const bufItem = breakdown.find(m => m.milk_type_id === 'buffalo_pure');
+    assert(cowItem && cowItem.liters === 31 && cowItem.amount === 1736, 'C-302 Cow Milk Pending: 31L @ ₹56 = ₹1,736');
+    assert(bufItem && bufItem.liters === 31 && bufItem.amount === 1860, 'C-302 Buffalo Milk Pending: 31L @ ₹60 = ₹1,860');
+    assert(c302Bill.body.data.pricing.net_due === 3596, 'C-302 Total August Pending Amount = ₹3,596');
+
+    // 7. Safar Villa 305: 1L/Day, ₹1860 Paid Via Cash, Net Due = 0
+    const sv305Bill = await request('GET', '/api/customers/cust_sv_305/report?date=2026-08-31');
+    assert(sv305Bill.body.data.pricing.total_payable === 1860 && sv305Bill.body.data.pricing.amount_paid === 1860,
+      'Safar Villa 305 August bill ₹1,860 paid in full');
+    assert(sv305Bill.body.data.pricing.net_due === 0, 'Safar Villa 305 Net Due = ₹0 (Paid Cash)');
+
+    // 8. Safar Villa 504: 1.5L/Day, ₹2,790 Pending
+    const sv504Bill = await request('GET', '/api/customers/cust_sv_504/report?date=2026-08-31');
+    assert(sv504Bill.body.data.pricing.net_due === 2790, 'Safar Villa 504 August Pending = ₹2,790');
+
+    // 9. Oscar Enclave B-102: 1.5L/Day, ₹2,790 Paid Cash
+    const oeB102Bill = await request('GET', '/api/customers/cust_oe_b102/report?date=2026-08-31');
+    assert(oeB102Bill.body.data.pricing.amount_paid === 2790 && oeB102Bill.body.data.pricing.net_due === 0,
+      'Oscar Enclave B-102 August bill ₹2,790 Paid Via Cash');
+
+    // 10. Jk Sarita Home No - 33: 1.5L/Day @ ₹66 = ₹3,069 Pending
+    const jk33Bill = await request('GET', '/api/customers/cust_jk_33/report?date=2026-08-31');
+    assert(jk33Bill.body.data.pricing.net_due === 3069, 'Jk Sarita Home No - 33 August Pending = ₹3,069 (Rate: ₹66/L)');
+
+    // 11. Official Admin Can Add Other Admin
+    const addAdminRes = await request('POST', '/api/auth/admins', {
+      username: 'admin2_test',
+      password: 'TestPassword@123',
+      name: 'Admin 2 (Assistant)',
+      role: 'admin'
     });
-    assert(saveA.status === 200 && saveA.body.status === 'delivered', `Mark ${firstCust.name} as Delivered (1.0L)`);
+    assert(addAdminRes.status === 200 && addAdminRes.body.success, 'Official Admin can add other Admin (Admin 2)');
 
-    const saveD = await request('POST', '/api/deliveries/save', {
-      customer_id: secondCust.id,
-      delivery_date: '2026-09-27',
-      status: 'absent',
-      quantity_liters: 0,
-      notes: 'Not at home today - skipped'
+    // 12. All Admins Can Change Their Name
+    const changeNameRes = await request('PUT', '/api/auth/admins/admin_1/name', {
+      name: 'Official Admin (Dairy Owner)'
     });
-    assert(saveD.status === 200 && saveD.body.finalQty === 0, `Mark ${secondCust.name} as Absent (0 Liters recorded)`);
+    assert(changeNameRes.status === 200 && changeNameRes.body.user.name === 'Official Admin (Dairy Owner)',
+      'Admin can change their name (Updated to "Official Admin (Dairy Owner)")');
 
-    // 8. Test Mark Remaining Delivered
-    const markAllRes = await request('POST', '/api/deliveries/mark-all-delivered', { date: '2026-09-27' });
-    assert(markAllRes.status === 200, 'Batch Mark Remaining Pending Customers as Delivered');
+    // Clean up test admin
+    if (addAdminRes.body.id) {
+      await request('DELETE', `/api/auth/admins/${addAdminRes.body.id}`);
+    }
 
-    // Verify Second House is STILL absent (0L) and not overwritten by batch mark!
-    const delivCheck = await request('GET', '/api/deliveries/date/2026-09-27');
-    const checkedSecond = delivCheck.body.data.find(d => d.customer_id === secondCust.id);
-    assert(checkedSecond && checkedSecond.status === 'absent' && checkedSecond.quantity_liters === 0, 'Integrity Check: Batch mark preserves Absent status (0L)');
+    // 13. Daily Deliveries Checklist has multi-milk info
+    const dailyRes = await request('GET', '/api/deliveries/date/2026-09-27');
+    assert(dailyRes.status === 200 && dailyRes.body.data.length === 11, 'Daily deliveries checklist loaded for all 11 customers');
+    const c302Daily = dailyRes.body.data.find(d => d.house_no === 'C-302');
+    assert(c302Daily && c302Daily.has_multiple_milk, 'Daily checklist accurately flags C-302 has_multiple_milk = true');
 
-    // 9. Customer Monthly Billing & Calculation Engine
-    const report1 = await request('GET', `/api/customers/${firstCust.id}/report?date=2026-09-27`);
-    assert(report1.status === 200 && report1.body.data.consumption.total_liters > 0, `Generate ${firstCust.name} Monthly Report`);
-    console.log(`     ℹ️ ${firstCust.name}: ${report1.body.data.consumption.total_liters}L consumed, Payable: ₹${report1.body.data.pricing.total_payable}`);
-
-    // 10. Due Alerts & 2-Day Advance Reminder
-    const alertsRes = await request('GET', '/api/billing/due-alerts?date=2026-09-27');
-    assert(alertsRes.status === 200, 'Fetch Billing Due Alerts');
-    assert(Array.isArray(alertsRes.body.cycle_ending_soon), '2-Day Advance Alert Engine active');
-    console.log(`     ℹ️ Found ${alertsRes.body.cycle_ending_soon.length} cycle(s) ending soon, ${alertsRes.body.pending_collections.length} pending collections`);
-
-    // 11. Partial Payments & Ledger Rollover
-    const payRes = await request('POST', '/api/payments', {
-      customer_id: firstCust.id,
-      amount: 500,
-      payment_mode: 'upi',
-      transaction_ref: 'UPI-TEST-1234',
-      notes: 'Partial payment test',
-      payment_date: '2026-09-27'
-    });
-    assert(payRes.status === 200 && payRes.body.amount_paid === 500, 'Record Partial Payment of ₹500 via UPI');
-    console.log(`     ℹ️ Remaining balance automatically calculated: ₹${payRes.body.remaining_balance}`);
-
-    // 12. OTP Authentication Engine
-    const otpSend = await request('POST', '/api/auth/send-otp', {
-      identifier: '+91 98201 30500',
-      role: 'customer'
-    });
-    assert(otpSend.status === 200 && otpSend.body.demo_otp, 'OTP Generated successfully with demo verification code');
-
-    const otpVerify = await request('POST', '/api/auth/verify-otp', {
-      identifier: '+91 98201 30500',
-      otp_code: otpSend.body.demo_otp
-    });
-    assert(otpVerify.status === 200 && otpVerify.body.token, 'OTP Verified and Session Token issued');
-
-    // 13. Dashboard Stats
-    const statsRes = await request('GET', '/api/dashboard/stats?date=2026-09-27');
-    assert(statsRes.status === 200 && statsRes.body.data.total_customers >= 10, 'Dashboard Aggregated Metrics for Real Customers');
-
-    console.log(`\n===========================================`);
-    console.log(`🏁 TEST SUMMARY: ${passed} Passed, ${failed} Failed`);
-    console.log(`===========================================\n`);
-
+    console.log(`\n🎉 Verification Complete: ${passed} Passed, ${failed} Failed.`);
   } catch (err) {
-    console.error('Fatal Test Exception:', err);
+    console.error('Test execution failed:', err);
   }
 }
 

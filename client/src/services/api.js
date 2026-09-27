@@ -151,6 +151,20 @@ export const api = {
     });
     return res.json();
   },
+  updateAdminName: async (id, data) => {
+    const res = await fetch(`${API_BASE}/auth/admins/${id}/name`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    return res.json();
+  },
+  deleteAdmin: async (id) => {
+    const res = await fetch(`${API_BASE}/auth/admins/${id}`, {
+      method: 'DELETE'
+    });
+    return res.json();
+  },
   sendOtp: async (identifier, role = 'admin') => {
     const res = await fetch(`${API_BASE}/auth/send-otp`, {
       method: 'POST',

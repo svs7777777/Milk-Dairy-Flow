@@ -153,14 +153,17 @@ export default function LoginPage({ onLoginSuccess }) {
                 setActiveTab('customer');
                 setErrorMessage('');
               }}
-              className={`py-2.5 px-3 rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 transition-all ${
+              className={`py-2.5 px-3 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 transition-all ${
                 activeTab === 'customer'
-                  ? 'bg-teal-600 text-white shadow-md'
+                  ? 'bg-amber-600 text-white shadow-md'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               <User className="w-4 h-4" />
               <span>Customer Portal</span>
+              <span className="text-[9px] uppercase tracking-wider bg-amber-400/30 text-amber-100 font-black px-1.5 py-0.5 rounded-full">
+                Soon
+              </span>
             </button>
           </div>
 
@@ -233,108 +236,57 @@ export default function LoginPage({ onLoginSuccess }) {
             </form>
           )}
 
-          {/* TAB 2: CUSTOMER OTP LOGIN FORM */}
+          {/* TAB 2: USER / CUSTOMER PORTAL FEATURE (COMING SOON) */}
           {activeTab === 'customer' && (
-            <div className="space-y-4">
-              <p className="text-xs text-slate-500">
-                Customers can log in using their registered mobile phone number to check daily milk records and pay via UPI.
-              </p>
+            <div className="space-y-4 text-center py-2 animate-in fade-in duration-200">
+              <div className="w-14 h-14 mx-auto rounded-3xl bg-amber-50 border-2 border-amber-200 flex items-center justify-center text-amber-600 shadow-inner">
+                <Sparkles className="w-7 h-7 stroke-[2.2] animate-pulse" />
+              </div>
 
-              {!otpSent ? (
-                <form onSubmit={handleCustomerSendOtp} className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                      Registered Mobile Number
-                    </label>
-                    <div className="relative">
-                      <Phone className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                      <input
-                        type="tel"
-                        required
-                        value={customerPhone}
-                        onChange={(e) => setCustomerPhone(e.target.value)}
-                        placeholder="Enter registered mobile number"
-                        className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 text-sm font-semibold text-slate-900 focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
-                      />
-                    </div>
-                  </div>
+              <div>
+                <div className="inline-block px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-800 font-extrabold text-[11px] mb-1.5 uppercase tracking-wider">
+                  Under Development
+                </div>
+                <h3 className="text-lg font-black text-slate-900 tracking-tight">
+                  User Feature Is Coming Soon! 🚀
+                </h3>
+                <p className="text-xs text-slate-500 max-w-xs mx-auto mt-1 leading-relaxed">
+                  The customer self-service mobile app is currently in active preparation. Customers will soon be able to log in to track daily milk, view monthly statements, and pay directly via UPI.
+                </p>
+              </div>
 
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="w-full py-3 px-4 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-sm shadow-md shadow-teal-600/30 tap-bounce transition-all flex items-center justify-center gap-2"
-                  >
-                    {loading ? (
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                    ) : (
-                      <>
-                        <span>Send Login OTP</span>
-                        <ArrowRight className="w-4 h-4" />
-                      </>
-                    )}
-                  </button>
-                </form>
-              ) : (
-                <form onSubmit={handleCustomerVerifyOtp} className="space-y-4">
-                  <div className="p-3.5 rounded-2xl bg-teal-50 border border-teal-200 text-xs text-teal-900">
-                    <p className="font-semibold">
-                      OTP sent to <strong>{customerPhone}</strong>
-                    </p>
-                    {demoOtp && (
-                      <div className="mt-2 pt-2 border-t border-teal-200 flex items-center justify-between">
-                        <span>Code: <strong>{demoOtp}</strong></span>
-                        <button
-                          type="button"
-                          onClick={() => setOtpCode(demoOtp)}
-                          className="px-2 py-0.5 rounded bg-teal-600 text-white text-[10px] font-bold"
-                        >
-                          Auto-fill
-                        </button>
-                      </div>
-                    )}
-                  </div>
+              {/* Feature Highlights Grid */}
+              <div className="grid grid-cols-3 gap-2 text-left pt-2">
+                <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80">
+                  <span className="text-sm block mb-1">📅</span>
+                  <strong className="block text-[11px] text-slate-900 font-bold">Daily Milk</strong>
+                  <span className="text-[10px] text-slate-400">Live delivery logs</span>
+                </div>
+                <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80">
+                  <span className="text-sm block mb-1">📄</span>
+                  <strong className="block text-[11px] text-slate-900 font-bold">Monthly Bills</strong>
+                  <span className="text-[10px] text-slate-400">PDF statements</span>
+                </div>
+                <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80">
+                  <span className="text-sm block mb-1">⚡</span>
+                  <strong className="block text-[11px] text-slate-900 font-bold">UPI Payments</strong>
+                  <span className="text-[10px] text-slate-400">1-click payments</span>
+                </div>
+              </div>
 
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                      Enter 6-Digit OTP
-                    </label>
-                    <input
-                      type="text"
-                      maxLength={6}
-                      required
-                      autoFocus
-                      value={otpCode}
-                      onChange={(e) => setOtpCode(e.target.value)}
-                      placeholder="• • • • • •"
-                      className="w-full text-center tracking-[0.4em] py-2.5 rounded-xl border border-slate-200 text-lg font-black text-slate-900 focus:outline-none focus:border-teal-500"
-                    />
-                  </div>
-
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setOtpSent(false)}
-                      className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-600 font-bold text-xs"
-                    >
-                      Back
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={loading}
-                      className="flex-1 py-2.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs shadow-md tap-bounce flex items-center justify-center gap-1.5"
-                    >
-                      {loading ? (
-                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                      ) : (
-                        <>
-                          <CheckCircle2 className="w-4 h-4" />
-                          <span>Verify & Enter</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </form>
-              )}
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('admin');
+                    setErrorMessage('');
+                  }}
+                  className="w-full py-2.5 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md tap-bounce flex items-center justify-center gap-2"
+                >
+                  <Shield className="w-4 h-4 text-teal-400" />
+                  <span>Switch to Admin Login (Active)</span>
+                </button>
+              </div>
             </div>
           )}
 

@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-const { db, initDb, seedDeliveries } = require('./db');
+const { db, initDb } = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -51,7 +51,7 @@ app.post('/api/settings', (req, res) => {
 });
 
 // -------------------------------------------------------------
-// MILK TYPES & PRICING APIS (Rate fluctuations)
+// MILK TYPES & PRICING APIS (Admin can change rates anytime)
 // -------------------------------------------------------------
 app.get('/api/milk-types', (req, res) => {
   try {
@@ -74,7 +74,7 @@ app.post('/api/milk-types', (req, res) => {
       VALUES (?, ?, ?, ?, ?, 1, datetime('now'))
     `).run(id, name, parseFloat(price_per_liter), fat_snf || '', description || '');
 
-    res.json({ success: true, message: 'Milk type added', id });
+    res.json({ success: true, message: 'Milk type added successfully', id });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -99,23 +99,28 @@ app.put('/api/milk-types/:id', (req, res) => {
       WHERE id = ?
     `).run(name, price_per_liter !== undefined ? parseFloat(price_per_liter) : null, fat_snf, description, id);
 
-    res.json({ success: true, message: 'Milk price/details updated successfully' });
+    res.json({ success: true, message: `Rate for ${name || existing.name} updated to ₹${price_per_liter}/L` });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
 // -------------------------------------------------------------
-// CUSTOMER APIS
+// CUSTOMER APIS (Supports Two Types of Milk per Customer)
 // -------------------------------------------------------------
 app.get('/api/customers', (req, res) => {
   try {
     const customers = db.prepare(`
-      SELECT c.*, m.name as milk_type_name, m.price_per_liter as milk_current_price
+      SELECT c.*, 
+        m1.name as milk_type_name, 
+        COALESCE(c.custom_price_per_liter, m1.price_per_liter) as milk_current_price,
+        m2.name as milk_type_2_name,
+        COALESCE(c.custom_price_2_per_liter, m2.price_per_liter) as milk_2_current_price
       FROM customers c
-      LEFT JOIN milk_types m ON c.default_milk_type_id = m.id
+      LEFT JOIN milk_types m1 ON c.default_milk_type_id = m1.id
+      LEFT JOIN milk_types m2 ON c.default_milk_type_2_id = m2.id
       WHERE c.status != 'deleted'
-      ORDER BY c.house_no ASC, c.name ASC
+      ORDER BY c.society ASC, c.house_no ASC
     `).all();
     res.json({ success: true, data: customers });
   } catch (err) {
@@ -130,9 +135,14 @@ app.post('/api/customers', (req, res) => {
       phone,
       email,
       address,
+      society,
       house_no,
       default_milk_type_id,
       default_quantity_liters,
+      custom_price_per_liter,
+      default_milk_type_2_id,
+      default_quantity_2_liters,
+      custom_price_2_per_liter,
       delivery_time_slot,
       billing_cycle_start_day,
       preferred_payment_mode,
@@ -145,25 +155,33 @@ app.post('/api/customers', (req, res) => {
     }
 
     const id = generateId('cust');
-    const milkTypeId = default_milk_type_id || 'cow_standard';
+    const milkTypeId = default_milk_type_id || 'buffalo_pure';
     const startDay = parseInt(billing_cycle_start_day, 10) || 1;
     const initialBalance = parseFloat(outstanding_balance) || 0.0;
     const defaultQty = parseFloat(default_quantity_liters) || 1.0;
+    const customPrice = custom_price_per_liter ? parseFloat(custom_price_per_liter) : null;
+    const milkType2Id = default_milk_type_2_id || null;
+    const defaultQty2 = parseFloat(default_quantity_2_liters) || 0.0;
+    const customPrice2 = custom_price_2_per_liter ? parseFloat(custom_price_2_per_liter) : null;
 
     db.prepare(`
       INSERT INTO customers (
-        id, name, phone, email, address, house_no, default_milk_type_id,
-        default_quantity_liters, delivery_time_slot, billing_cycle_start_day,
-        preferred_payment_mode, upi_id, outstanding_balance, status, created_at
+        id, society, name, phone, email, address, house_no,
+        default_milk_type_id, default_quantity_liters, custom_price_per_liter,
+        default_milk_type_2_id, default_quantity_2_liters, custom_price_2_per_liter,
+        delivery_time_slot, billing_cycle_start_day, preferred_payment_mode,
+        upi_id, outstanding_balance, status, created_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', datetime('now'))
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', datetime('now'))
     `).run(
-      id, name, phone, email || '', address, house_no || '', milkTypeId,
-      defaultQty, delivery_time_slot || 'Morning', startDay,
+      id, society || 'General', name, phone, email || '', address, house_no || '',
+      milkTypeId, defaultQty, customPrice,
+      milkType2Id, defaultQty2, customPrice2,
+      delivery_time_slot || 'Morning Shift', startDay,
       preferred_payment_mode || 'cash', upi_id || '', initialBalance
     );
 
-    res.json({ success: true, message: 'Customer added successfully', id });
+    res.json({ success: true, message: 'Customer registered successfully', id });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -173,8 +191,10 @@ app.put('/api/customers/:id', (req, res) => {
   try {
     const { id } = req.params;
     const {
-      name, phone, email, address, house_no, default_milk_type_id,
-      default_quantity_liters, delivery_time_slot, billing_cycle_start_day,
+      name, phone, email, address, society, house_no,
+      default_milk_type_id, default_quantity_liters, custom_price_per_liter,
+      default_milk_type_2_id, default_quantity_2_liters, custom_price_2_per_liter,
+      delivery_time_slot, billing_cycle_start_day,
       preferred_payment_mode, upi_id, outstanding_balance, status
     } = req.body;
 
@@ -184,9 +204,14 @@ app.put('/api/customers/:id', (req, res) => {
           phone = COALESCE(?, phone),
           email = COALESCE(?, email),
           address = COALESCE(?, address),
+          society = COALESCE(?, society),
           house_no = COALESCE(?, house_no),
           default_milk_type_id = COALESCE(?, default_milk_type_id),
           default_quantity_liters = COALESCE(?, default_quantity_liters),
+          custom_price_per_liter = ?,
+          default_milk_type_2_id = ?,
+          default_quantity_2_liters = COALESCE(?, default_quantity_2_liters),
+          custom_price_2_per_liter = ?,
           delivery_time_slot = COALESCE(?, delivery_time_slot),
           billing_cycle_start_day = COALESCE(?, billing_cycle_start_day),
           preferred_payment_mode = COALESCE(?, preferred_payment_mode),
@@ -195,8 +220,13 @@ app.put('/api/customers/:id', (req, res) => {
           status = COALESCE(?, status)
       WHERE id = ?
     `).run(
-      name, phone, email, address, house_no, default_milk_type_id,
+      name, phone, email, address, society, house_no,
+      default_milk_type_id,
       default_quantity_liters !== undefined ? parseFloat(default_quantity_liters) : null,
+      custom_price_per_liter !== undefined ? (custom_price_per_liter ? parseFloat(custom_price_per_liter) : null) : null,
+      default_milk_type_2_id || null,
+      default_quantity_2_liters !== undefined ? parseFloat(default_quantity_2_liters) : null,
+      custom_price_2_per_liter !== undefined ? (custom_price_2_per_liter ? parseFloat(custom_price_2_per_liter) : null) : null,
       delivery_time_slot,
       billing_cycle_start_day !== undefined ? parseInt(billing_cycle_start_day, 10) : null,
       preferred_payment_mode, upi_id,
@@ -204,7 +234,7 @@ app.put('/api/customers/:id', (req, res) => {
       status, id
     );
 
-    res.json({ success: true, message: 'Customer updated successfully' });
+    res.json({ success: true, message: 'Customer profile updated successfully' });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -214,22 +244,27 @@ app.delete('/api/customers/:id', (req, res) => {
   try {
     const { id } = req.params;
     db.prepare("UPDATE customers SET status = 'deleted' WHERE id = ?").run(id);
-    res.json({ success: true, message: 'Customer removed' });
+    res.json({ success: true, message: 'Customer archived' });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
 // -------------------------------------------------------------
-// DAILY DELIVERY APIS (Sticky Tracker & Quick Attendance Checklist)
+// DAILY DELIVERY APIS (Supports Two Types of Milk per Delivery)
 // -------------------------------------------------------------
 app.get('/api/deliveries/date/:date', (req, res) => {
   try {
     const date = req.params.date || getTodayStr();
     const customers = db.prepare(`
-      SELECT c.*, m.name as milk_type_name, m.price_per_liter as default_price
+      SELECT c.*, 
+        m1.name as milk_type_name, 
+        COALESCE(c.custom_price_per_liter, m1.price_per_liter) as milk_current_price,
+        m2.name as milk_type_2_name,
+        COALESCE(c.custom_price_2_per_liter, m2.price_per_liter) as milk_2_current_price
       FROM customers c
-      LEFT JOIN milk_types m ON c.default_milk_type_id = m.id
+      LEFT JOIN milk_types m1 ON c.default_milk_type_id = m1.id
+      LEFT JOIN milk_types m2 ON c.default_milk_type_2_id = m2.id
       WHERE c.status = 'active'
       ORDER BY c.society ASC, c.house_no ASC
     `).all();
@@ -241,49 +276,75 @@ app.get('/api/deliveries/date/:date', (req, res) => {
       WHERE d.delivery_date = ?
     `).all(date);
 
+    // Map by customer_id and milk_type_id
     const deliveryMap = {};
-    existingDeliveries.forEach(d => { deliveryMap[d.customer_id] = d; });
+    existingDeliveries.forEach(d => {
+      if (!deliveryMap[d.customer_id]) deliveryMap[d.customer_id] = {};
+      deliveryMap[d.customer_id][d.milk_type_id] = d;
+    });
 
-    // Format list with delivery status for that specific date
     const checklist = customers.map(cust => {
-      const recorded = deliveryMap[cust.id];
-      if (recorded) {
-        return {
-          customer_id: cust.id,
-          customer_name: cust.name,
-          phone: cust.phone,
-          house_no: cust.house_no,
-          society: cust.society || 'General',
-          address: cust.address,
-          milk_type_id: recorded.milk_type_id,
-          milk_type_name: recorded.milk_name || cust.milk_type_name,
-          quantity_liters: recorded.quantity_liters,
-          default_quantity: cust.default_quantity_liters,
-          price_per_liter: recorded.price_per_liter,
-          preferred_payment_mode: cust.preferred_payment_mode,
-          status: recorded.status, // 'delivered', 'absent'
-          notes: recorded.notes || '',
-          is_recorded: true
-        };
-      } else {
-        return {
-          customer_id: cust.id,
-          customer_name: cust.name,
-          phone: cust.phone,
-          house_no: cust.house_no,
-          society: cust.society || 'General',
-          address: cust.address,
-          milk_type_id: cust.default_milk_type_id,
-          milk_type_name: cust.milk_type_name,
-          quantity_liters: cust.default_quantity_liters,
-          default_quantity: cust.default_quantity_liters,
-          price_per_liter: cust.milk_current_price,
-          preferred_payment_mode: cust.preferred_payment_mode,
-          status: 'pending', // not checked yet today
-          notes: '',
-          is_recorded: false
-        };
+      const rec1 = deliveryMap[cust.id] ? deliveryMap[cust.id][cust.default_milk_type_id] : null;
+      const rec2 = cust.default_milk_type_2_id && deliveryMap[cust.id] ? deliveryMap[cust.id][cust.default_milk_type_2_id] : null;
+
+      const hasMultipleMilk = Boolean(cust.default_milk_type_2_id && cust.default_quantity_2_liters > 0);
+
+      // Primary Milk Item
+      const item1 = {
+        milk_type_id: cust.default_milk_type_id,
+        milk_name: cust.milk_type_name || 'Buffalo Milk',
+        quantity_liters: rec1 ? rec1.quantity_liters : cust.default_quantity_liters,
+        default_quantity: cust.default_quantity_liters,
+        price_per_liter: rec1 ? rec1.price_per_liter : cust.milk_current_price,
+        status: rec1 ? rec1.status : 'pending',
+        notes: rec1?.notes || ''
+      };
+
+      // Secondary Milk Item (if applicable)
+      const item2 = hasMultipleMilk ? {
+        milk_type_id: cust.default_milk_type_2_id,
+        milk_name: cust.milk_type_2_name || 'Cow Milk',
+        quantity_liters: rec2 ? rec2.quantity_liters : cust.default_quantity_2_liters,
+        default_quantity: cust.default_quantity_2_liters,
+        price_per_liter: rec2 ? rec2.price_per_liter : cust.milk_2_current_price,
+        status: rec2 ? rec2.status : 'pending',
+        notes: rec2?.notes || ''
+      } : null;
+
+      // Overall status
+      let overallStatus = 'pending';
+      if (item1.status === 'delivered' && (!item2 || item2.status === 'delivered')) {
+        overallStatus = 'delivered';
+      } else if (item1.status === 'absent' && (!item2 || item2.status === 'absent')) {
+        overallStatus = 'absent';
+      } else if (rec1 || rec2) {
+        overallStatus = item1.status;
       }
+
+      const totalLiters = (item1.status === 'delivered' ? item1.quantity_liters : 0) +
+                          (item2 && item2.status === 'delivered' ? item2.quantity_liters : 0);
+
+      return {
+        customer_id: cust.id,
+        customer_name: cust.name,
+        phone: cust.phone,
+        house_no: cust.house_no,
+        society: cust.society || 'General',
+        address: cust.address,
+        has_multiple_milk: hasMultipleMilk,
+        item1,
+        item2,
+        // Legacy compatibility fields
+        milk_type_id: item1.milk_type_id,
+        milk_type_name: hasMultipleMilk ? `${item1.milk_name} + ${item2.milk_name}` : item1.milk_name,
+        quantity_liters: totalLiters,
+        default_quantity: cust.default_quantity_liters + (cust.default_quantity_2_liters || 0),
+        price_per_liter: item1.price_per_liter,
+        preferred_payment_mode: cust.preferred_payment_mode,
+        status: overallStatus,
+        notes: item1.notes,
+        is_recorded: Boolean(rec1 || rec2)
+      };
     });
 
     res.json({ success: true, date, data: checklist });
@@ -292,7 +353,7 @@ app.get('/api/deliveries/date/:date', (req, res) => {
   }
 });
 
-// Single save/toggle for delivery
+// Single save/toggle for delivery (supports specifying milk_type_id)
 app.post('/api/deliveries/save', (req, res) => {
   try {
     const { customer_id, delivery_date, status, quantity_liters, milk_type_id, notes } = req.body;
@@ -300,49 +361,74 @@ app.post('/api/deliveries/save', (req, res) => {
       return res.status(400).json({ success: false, error: 'Customer ID, date and status are required' });
     }
 
-    const cust = db.prepare('SELECT * FROM customers WHERE id = ?').get(customer_id);
+    const cust = db.prepare(`
+      SELECT c.*, 
+        m1.price_per_liter as p1, 
+        m2.price_per_liter as p2 
+      FROM customers c
+      LEFT JOIN milk_types m1 ON c.default_milk_type_id = m1.id
+      LEFT JOIN milk_types m2 ON c.default_milk_type_2_id = m2.id
+      WHERE c.id = ?
+    `).get(customer_id);
+
     if (!cust) return res.status(404).json({ success: false, error: 'Customer not found' });
 
     const targetMilkId = milk_type_id || cust.default_milk_type_id;
-    const milk = db.prepare('SELECT * FROM milk_types WHERE id = ?').get(targetMilkId) || { price_per_liter: 60 };
+
+    // Determine correct price
+    let targetPrice = 60.0;
+    if (targetMilkId === cust.default_milk_type_id) {
+      targetPrice = cust.custom_price_per_liter || cust.p1 || 60.0;
+    } else if (targetMilkId === cust.default_milk_type_2_id) {
+      targetPrice = cust.custom_price_2_per_liter || cust.p2 || 56.0;
+    } else {
+      const milk = db.prepare('SELECT price_per_liter FROM milk_types WHERE id = ?').get(targetMilkId);
+      targetPrice = milk ? milk.price_per_liter : 60.0;
+    }
 
     let finalQty = 0;
     if (status === 'delivered') {
-      finalQty = quantity_liters !== undefined ? parseFloat(quantity_liters) : cust.default_quantity_liters;
+      if (quantity_liters !== undefined) {
+        finalQty = parseFloat(quantity_liters);
+      } else {
+        finalQty = (targetMilkId === cust.default_milk_type_2_id) ? cust.default_quantity_2_liters : cust.default_quantity_liters;
+      }
     } else if (status === 'absent') {
-      finalQty = 0; // Not at home / Leave -> 0 Liters
+      finalQty = 0;
     } else {
       finalQty = parseFloat(quantity_liters) || 0;
     }
 
-    const deliveryId = `del_${customer_id}_${delivery_date}`;
+    const deliveryId = `del_${customer_id}_${delivery_date}_${targetMilkId}`;
     db.prepare(`
       INSERT OR REPLACE INTO deliveries (
         id, customer_id, delivery_date, milk_type_id, quantity_liters, price_per_liter, status, notes, created_at
       )
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-    `).run(deliveryId, customer_id, delivery_date, targetMilkId, finalQty, milk.price_per_liter, status, notes || '');
+    `).run(deliveryId, customer_id, delivery_date, targetMilkId, finalQty, targetPrice, status, notes || '');
 
-    res.json({ success: true, message: 'Delivery recorded', status, finalQty });
+    res.json({ success: true, message: 'Delivery recorded', status, finalQty, milk_type_id: targetMilkId });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// Quick Mark All Pending as Delivered for a date (preserves existing absent records!)
+// Mark All Pending as Delivered for a date
 app.post('/api/deliveries/mark-all-delivered', (req, res) => {
   try {
     const targetDate = req.body.date || getTodayStr();
     const customers = db.prepare(`
-      SELECT c.*, m.price_per_liter
+      SELECT c.*, 
+        m1.price_per_liter as p1, 
+        m2.price_per_liter as p2 
       FROM customers c
-      LEFT JOIN milk_types m ON c.default_milk_type_id = m.id
+      LEFT JOIN milk_types m1 ON c.default_milk_type_id = m1.id
+      LEFT JOIN milk_types m2 ON c.default_milk_type_2_id = m2.id
       WHERE c.status = 'active'
     `).all();
 
-    // Check which customers already have a record for this date
-    const existing = db.prepare('SELECT customer_id FROM deliveries WHERE delivery_date = ?').all(targetDate);
-    const existingSet = new Set(existing.map(e => e.customer_id));
+    const existing = db.prepare('SELECT customer_id, milk_type_id FROM deliveries WHERE delivery_date = ?').all(targetDate);
+    const existingSet = new Set(existing.map(e => `${e.customer_id}_${e.milk_type_id}`));
 
     const insertStmt = db.prepare(`
       INSERT INTO deliveries (id, customer_id, delivery_date, milk_type_id, quantity_liters, price_per_liter, status, notes, created_at)
@@ -351,21 +437,28 @@ app.post('/api/deliveries/mark-all-delivered', (req, res) => {
 
     let markedCount = 0;
     customers.forEach(cust => {
-      if (!existingSet.has(cust.id)) {
-        const deliveryId = `del_${cust.id}_${targetDate}`;
-        insertStmt.run(
-          deliveryId,
-          cust.id,
-          targetDate,
-          cust.default_milk_type_id,
-          cust.default_quantity_liters,
-          cust.price_per_liter || 60
-        );
+      // Primary milk
+      const key1 = `${cust.id}_${cust.default_milk_type_id}`;
+      if (!existingSet.has(key1)) {
+        const d1Id = `del_${cust.id}_${targetDate}_1`;
+        const price1 = cust.custom_price_per_liter || cust.p1 || 60.0;
+        insertStmt.run(d1Id, cust.id, targetDate, cust.default_milk_type_id, cust.default_quantity_liters, price1);
         markedCount++;
+      }
+
+      // Secondary milk (if customer has two types of milk)
+      if (cust.default_milk_type_2_id && cust.default_quantity_2_liters > 0) {
+        const key2 = `${cust.id}_${cust.default_milk_type_2_id}`;
+        if (!existingSet.has(key2)) {
+          const d2Id = `del_${cust.id}_${targetDate}_2`;
+          const price2 = cust.custom_price_2_per_liter || cust.p2 || 56.0;
+          insertStmt.run(d2Id, cust.id, targetDate, cust.default_milk_type_2_id, cust.default_quantity_2_liters, price2);
+          markedCount++;
+        }
       }
     });
 
-    res.json({ success: true, message: `Marked ${markedCount} pending customers as delivered for ${targetDate}` });
+    res.json({ success: true, message: `Dispatched deliveries for all customers for ${targetDate}` });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -373,15 +466,20 @@ app.post('/api/deliveries/mark-all-delivered', (req, res) => {
 
 // -------------------------------------------------------------
 // BILLING ENGINE & CUSTOMER MONTHLY CALCULATION
-// Robust calendar-based arithmetic handling arbitrary cycle start dates (e.g. 26th-to-26th)
+// Full itemized breakdown by milk type & custom calendar cycle
 // -------------------------------------------------------------
 function calculateCustomerCycle(customerId, refDateStr) {
   const targetDateStr = refDateStr || getTodayStr();
 
   const cust = db.prepare(`
-    SELECT c.*, m.name as milk_name, m.price_per_liter as default_rate
+    SELECT c.*, 
+      m1.name as milk_name, 
+      COALESCE(c.custom_price_per_liter, m1.price_per_liter) as default_rate,
+      m2.name as milk_2_name,
+      COALESCE(c.custom_price_2_per_liter, m2.price_per_liter) as default_rate_2
     FROM customers c
-    LEFT JOIN milk_types m ON c.default_milk_type_id = m.id
+    LEFT JOIN milk_types m1 ON c.default_milk_type_id = m1.id
+    LEFT JOIN milk_types m2 ON c.default_milk_type_2_id = m2.id
     WHERE c.id = ?
   `).get(customerId);
 
@@ -390,12 +488,10 @@ function calculateCustomerCycle(customerId, refDateStr) {
   const [refYear, refMonth, refDay] = targetDateStr.split('-').map(Number);
   const cycleDay = cust.billing_cycle_start_day || 1;
 
-  // Compute current cycle start and next billing date
   let startYear = refYear;
   let startMonth = refMonth;
 
   if (refDay < cycleDay) {
-    // Current cycle started in the preceding month
     startMonth -= 1;
     if (startMonth < 1) {
       startMonth = 12;
@@ -403,7 +499,6 @@ function calculateCustomerCycle(customerId, refDateStr) {
     }
   }
 
-  // Next billing month and year
   let nextBillingYear = startYear;
   let nextBillingMonth = startMonth + 1;
   if (nextBillingMonth > 12) {
@@ -411,10 +506,8 @@ function calculateCustomerCycle(customerId, refDateStr) {
     nextBillingYear += 1;
   }
 
-  // Use local Date constructor for boundary calculation
   const startDt = new Date(startYear, startMonth - 1, cycleDay);
   const nextBillingDt = new Date(nextBillingYear, nextBillingMonth - 1, cycleDay);
-  // End date is exactly the day before the next billing date
   const endDt = new Date(nextBillingYear, nextBillingMonth - 1, cycleDay - 1);
 
   const formatYMD = (d) => {
@@ -428,20 +521,18 @@ function calculateCustomerCycle(customerId, refDateStr) {
   const endStr = formatYMD(endDt);
   const billingStr = formatYMD(nextBillingDt);
 
-  // Compute exact days until next billing
   const refDt = new Date(refYear, refMonth - 1, refDay);
   const diffMs = nextBillingDt.getTime() - refDt.getTime();
   const daysUntilBilling = Math.round(diffMs / (1000 * 60 * 60 * 24));
-  // 2-Day Advance Alert triggers when 0 to 2 days remain before cycle end!
   const isAdvanceReminder = daysUntilBilling <= 2 && daysUntilBilling >= 0;
 
-  // Fetch all delivery records for this customer in this cycle
+  // Deliveries in this cycle
   const deliveries = db.prepare(`
     SELECT d.*, m.name as milk_name
     FROM deliveries d
     LEFT JOIN milk_types m ON d.milk_type_id = m.id
     WHERE d.customer_id = ? AND d.delivery_date >= ? AND d.delivery_date <= ?
-    ORDER BY d.delivery_date ASC
+    ORDER BY d.delivery_date ASC, d.milk_type_id ASC
   `).all(customerId, startStr, endStr);
 
   let totalLiters = 0;
@@ -449,25 +540,48 @@ function calculateCustomerCycle(customerId, refDateStr) {
   let deliveryDaysCount = 0;
   let absentDaysCount = 0;
 
+  // Breakdown by milk type (e.g. Cow Milk vs Buffalo Milk)
+  const milkBreakdownMap = {};
+
   deliveries.forEach(del => {
     if (del.status === 'delivered') {
       totalLiters += del.quantity_liters;
-      cycleCost += (del.quantity_liters * del.price_per_liter);
+      const itemCost = del.quantity_liters * del.price_per_liter;
+      cycleCost += itemCost;
       deliveryDaysCount++;
+
+      if (!milkBreakdownMap[del.milk_type_id]) {
+        milkBreakdownMap[del.milk_type_id] = {
+          milk_type_id: del.milk_type_id,
+          milk_name: del.milk_name || 'Milk',
+          liters: 0,
+          price_per_liter: del.price_per_liter,
+          amount: 0
+        };
+      }
+      milkBreakdownMap[del.milk_type_id].liters += del.quantity_liters;
+      milkBreakdownMap[del.milk_type_id].amount += itemCost;
     } else if (del.status === 'absent') {
       absentDaysCount++;
     }
   });
 
-  // Payments recorded for this customer in this cycle
+  const milkBreakdown = Object.values(milkBreakdownMap).map(m => ({
+    ...m,
+    liters: parseFloat(m.liters.toFixed(2)),
+    amount: parseFloat(m.amount.toFixed(2))
+  }));
+
+  // Payments in this cycle
   const payments = db.prepare(`
     SELECT * FROM payments 
-    WHERE customer_id = ? AND payment_date >= ?
+    WHERE customer_id = ? AND payment_date >= ? AND payment_date <= ?
     ORDER BY payment_date DESC
-  `).all(customerId, startStr);
+  `).all(customerId, startStr, endStr);
 
   const totalPaidInCycle = payments.reduce((sum, p) => sum + p.amount, 0);
-  const previousOutstanding = cust.outstanding_balance || 0;
+  // August is the baseline month so its prior due is 0; subsequent months inherit August pending
+  const previousOutstanding = startStr.startsWith('2026-08') ? 0.0 : (cust.outstanding_balance || 0.0);
   const totalPayable = previousOutstanding + cycleCost;
   const netDue = Math.max(0, totalPayable - totalPaidInCycle);
 
@@ -478,14 +592,15 @@ function calculateCustomerCycle(customerId, refDateStr) {
       end_date: endStr,
       billing_date: billingStr,
       days_until_billing: daysUntilBilling,
-      is_advance_reminder: isAdvanceReminder, // 2 days before cycle popup
+      is_advance_reminder: isAdvanceReminder,
       is_billing_day_or_past: daysUntilBilling <= 0
     },
     consumption: {
       total_liters: parseFloat(totalLiters.toFixed(2)),
       delivery_days: deliveryDaysCount,
       absent_days: absentDaysCount,
-      total_records: deliveries.length
+      total_records: deliveries.length,
+      milk_breakdown: milkBreakdown
     },
     pricing: {
       cycle_milk_cost: parseFloat(cycleCost.toFixed(2)),
@@ -511,14 +626,10 @@ app.get('/api/customers/:id/report', (req, res) => {
   }
 });
 
-// -------------------------------------------------------------
-// DUE ALERTS & 10TH OF MONTH / ADVANCE CYCLE REMINDERS
-// -------------------------------------------------------------
+// Due Alerts & Advance Cycle Reminders
 app.get('/api/billing/due-alerts', (req, res) => {
   try {
     const today = req.query.date || getTodayStr();
-    const [year, month, dayOfMonth] = today.split('-').map(Number);
-
     const customers = db.prepare("SELECT id FROM customers WHERE status = 'active'").all();
     const cycleEndingSoon = [];
     const pendingCollections = [];
@@ -527,7 +638,6 @@ app.get('/api/billing/due-alerts', (req, res) => {
       const report = calculateCustomerCycle(c.id, today);
       if (!report) return;
 
-      // 1. Advance Notice: 2 days before billing cycle date
       if (report.cycle.is_advance_reminder) {
         cycleEndingSoon.push({
           customer_id: report.customer.id,
@@ -545,43 +655,37 @@ app.get('/api/billing/due-alerts', (req, res) => {
         });
       }
 
-      // 2. Pending or Overdue balance
       if (report.pricing.net_due > 0) {
         pendingCollections.push({
           customer_id: report.customer.id,
           customer_name: report.customer.name,
           phone: report.customer.phone,
           house_no: report.customer.house_no,
+          society: report.customer.society,
           net_due: report.pricing.net_due,
-          billing_day: report.customer.billing_cycle_start_day,
-          preferred_payment_mode: report.customer.preferred_payment_mode,
-          last_payment: report.payments[0] || null
+          total_payable: report.pricing.total_payable,
+          amount_paid: report.pricing.amount_paid,
+          preferred_payment_mode: report.customer.preferred_payment_mode
         });
       }
     });
 
-    // 3. 10th of Month General Collection Reminder
-    const is10th = dayOfMonth === 10;
-    const isAfter10th = dayOfMonth > 10;
-
     res.json({
       success: true,
-      current_date: today,
-      is_10th_reminder_active: is10th,
-      is_after_10th_overdue: isAfter10th,
-      cycle_ending_soon: cycleEndingSoon,
-      pending_collections: pendingCollections,
-      total_pending_amount: pendingCollections.reduce((sum, item) => sum + item.net_due, 0)
+      data: {
+        date: today,
+        advance_alerts_count: cycleEndingSoon.length,
+        advance_alerts: cycleEndingSoon,
+        pending_collections_count: pendingCollections.length,
+        pending_collections: pendingCollections
+      }
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// -------------------------------------------------------------
-// PAYMENTS & PARTIAL BALANCE LEDGER
-// Pure double-entry payments: records payment, preserves exact accounting
-// -------------------------------------------------------------
+// Payments
 app.post('/api/payments', (req, res) => {
   try {
     const { customer_id, amount, payment_mode, transaction_ref, notes, payment_date } = req.body;
@@ -596,13 +700,11 @@ app.post('/api/payments', (req, res) => {
     const payDate = payment_date || getTodayStr();
     const payId = generateId('pay');
 
-    // Insert payment record into ledger
     db.prepare(`
       INSERT INTO payments (id, customer_id, payment_date, amount, payment_mode, transaction_ref, notes, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
     `).run(payId, customer_id, payDate, payAmount, payment_mode || 'cash', transaction_ref || '', notes || '');
 
-    // Recompute current report to return exact net due
     const updated = calculateCustomerCycle(customer_id, payDate);
 
     res.json({
@@ -630,8 +732,8 @@ app.get('/api/payments/customer/:id', (req, res) => {
 
 // -------------------------------------------------------------
 // AUTHENTICATION & MULTI-ADMIN APIS
+// Single Official Admin can add other admins; All admins can change their name
 // -------------------------------------------------------------
-// Admin Username & Password Login (e.g. admin1 / Dairy@2026)
 app.post('/api/auth/admin-login', (req, res) => {
   try {
     const { username, password } = req.body;
@@ -666,7 +768,7 @@ app.post('/api/auth/admin-login', (req, res) => {
   }
 });
 
-// List all registered admins (Multi-Admin management)
+// List all admins
 app.get('/api/auth/admins', (req, res) => {
   try {
     const admins = db.prepare('SELECT id, username, email, name, role, phone, created_at FROM admins').all();
@@ -676,24 +778,24 @@ app.get('/api/auth/admins', (req, res) => {
   }
 });
 
-// Create new admin (Admin 2, Admin 3, etc.)
+// Official Admin creates a new secondary Admin
 app.post('/api/auth/admins', (req, res) => {
   try {
     const { username, password, name, email, phone, role } = req.body;
     if (!username || !password || !name) {
-      return res.status(400).json({ success: false, error: 'Username, password and name are required' });
+      return res.status(400).json({ success: false, error: 'Username, password, and name are required' });
     }
 
-    const existing = db.prepare('SELECT id FROM admins WHERE username = ?').get(username);
+    const existing = db.prepare('SELECT id FROM admins WHERE username = ?').get(username.trim());
     if (existing) {
-      return res.status(400).json({ success: false, error: 'Admin username already exists' });
+      return res.status(400).json({ success: false, error: 'Admin username already taken' });
     }
 
     const id = generateId('admin');
     db.prepare(`
       INSERT INTO admins (id, username, email, password_hash, name, role, phone, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
-    `).run(id, username.trim(), email || '', password, name, role || 'admin', phone || '');
+    `).run(id, username.trim(), email || '', password, name.trim(), role || 'admin', phone || '');
 
     res.json({ success: true, message: `Admin account '${name}' created successfully!`, id });
   } catch (err) {
@@ -701,6 +803,56 @@ app.post('/api/auth/admins', (req, res) => {
   }
 });
 
+// ALL ADMINS CAN CHANGE THEIR NAME (Profile update)
+app.put('/api/auth/admins/:id/name', (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, phone, email } = req.body;
+
+    if (!name || !name.trim()) {
+      return res.status(400).json({ success: false, error: 'Admin name cannot be empty' });
+    }
+
+    const admin = db.prepare('SELECT * FROM admins WHERE id = ?').get(id);
+    if (!admin) {
+      return res.status(404).json({ success: false, error: 'Admin not found' });
+    }
+
+    db.prepare(`
+      UPDATE admins 
+      SET name = ?,
+          phone = COALESCE(?, phone),
+          email = COALESCE(?, email)
+      WHERE id = ?
+    `).run(name.trim(), phone || null, email || null, id);
+
+    const updated = db.prepare('SELECT id, username, email, name, role, phone FROM admins WHERE id = ?').get(id);
+
+    res.json({
+      success: true,
+      message: `Admin name updated to '${name.trim()}'`,
+      user: updated
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Official Admin deletes secondary admin
+app.delete('/api/auth/admins/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    if (id === 'admin_1') {
+      return res.status(400).json({ success: false, error: 'Cannot delete the primary Official Admin account.' });
+    }
+    db.prepare('DELETE FROM admins WHERE id = ?').run(id);
+    res.json({ success: true, message: 'Admin account removed successfully' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Send OTP
 app.post('/api/auth/send-otp', (req, res) => {
   try {
     const { identifier, role } = req.body;
@@ -715,20 +867,20 @@ app.post('/api/auth/send-otp', (req, res) => {
     db.prepare(`
       INSERT OR REPLACE INTO otp_sessions (id, identifier, otp_code, role, expires_at, verified)
       VALUES (?, ?, ?, ?, ?, 0)
-    `).run(sessionId, identifier, otp, role || 'admin', expiresAt);
+    `).run(sessionId, identifier, otp, role || 'customer', expiresAt);
 
     res.json({
       success: true,
       message: `OTP sent successfully to ${identifier}`,
-      sessionId,
-      demo_otp: otp,
-      expires_in: '10 minutes'
+      session_id: sessionId,
+      demo_otp: otp
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
+// Verify OTP
 app.post('/api/auth/verify-otp', (req, res) => {
   try {
     const { identifier, otp_code } = req.body;
@@ -738,27 +890,45 @@ app.post('/api/auth/verify-otp', (req, res) => {
 
     const session = db.prepare(`
       SELECT * FROM otp_sessions 
-      WHERE identifier = ? AND (otp_code = ? OR ? = '123456')
+      WHERE identifier = ? AND otp_code = ? AND verified = 0
       ORDER BY expires_at DESC LIMIT 1
-    `).get(identifier, otp_code, otp_code);
+    `).get(identifier, otp_code);
 
     if (!session) {
-      return res.status(400).json({ success: false, error: 'Invalid or expired OTP. Please try again.' });
+      return res.status(400).json({ success: false, error: 'Invalid or expired OTP code' });
     }
 
     db.prepare('UPDATE otp_sessions SET verified = 1 WHERE id = ?').run(session.id);
-    const customer = db.prepare('SELECT * FROM customers WHERE phone = ? OR email = ?').get(identifier, identifier);
+
+    // Find customer by phone
+    const cleanPhone = identifier.replace(/[^0-9]/g, '');
+    const cust = db.prepare("SELECT * FROM customers WHERE phone LIKE ? AND status = 'active'").get(`%${cleanPhone.slice(-10)}%`);
+
+    if (cust) {
+      return res.json({
+        success: true,
+        message: 'Customer verified successfully',
+        token: `cust_token_${cust.id}_${Date.now()}`,
+        user: {
+          id: cust.id,
+          name: cust.name,
+          role: 'customer',
+          phone: cust.phone,
+          house_no: cust.house_no,
+          society: cust.society
+        }
+      });
+    }
 
     res.json({
       success: true,
-      message: 'Authentication successful',
-      token: `token_${Date.now()}`,
-      role: session.role || 'customer',
+      message: 'Verified successfully',
+      token: `user_token_${Date.now()}`,
       user: {
-        identifier,
-        role: session.role || (customer ? 'customer' : 'admin'),
-        customerId: customer ? customer.id : null,
-        name: customer ? customer.name : (session.role === 'admin' ? 'Dairy Administrator' : 'Valued Customer')
+        id: 'guest',
+        name: identifier,
+        role: 'customer',
+        phone: identifier
       }
     });
   } catch (err) {
@@ -766,25 +936,25 @@ app.post('/api/auth/verify-otp', (req, res) => {
   }
 });
 
-// -------------------------------------------------------------
-// DASHBOARD AGGREGATED STATS API
-// -------------------------------------------------------------
-app.get('/api/dashboard/stats', (req, res) => {
+// Live Analytics
+app.get('/api/analytics/dashboard', (req, res) => {
   try {
-    const today = req.query.date || getTodayStr();
+    const today = getTodayStr();
+    const currentMonthPrefix = today.substring(0, 7);
+
     const totalCustomers = db.prepare("SELECT COUNT(*) as count FROM customers WHERE status = 'active'").get().count;
 
     const todayDeliveries = db.prepare(`
       SELECT 
-        COUNT(CASE WHEN status = 'delivered' THEN 1 END) as delivered_count,
-        COUNT(CASE WHEN status = 'absent' THEN 1 END) as absent_count,
+        COUNT(DISTINCT customer_id) as total_customers_active,
         COALESCE(SUM(CASE WHEN status = 'delivered' THEN quantity_liters ELSE 0 END), 0) as today_liters,
-        COALESCE(SUM(CASE WHEN status = 'delivered' THEN quantity_liters * price_per_liter ELSE 0 END), 0) as today_revenue
+        COALESCE(SUM(CASE WHEN status = 'delivered' THEN quantity_liters * price_per_liter ELSE 0 END), 0) as today_revenue,
+        COUNT(DISTINCT CASE WHEN status = 'delivered' THEN customer_id END) as delivered_count,
+        COUNT(DISTINCT CASE WHEN status = 'absent' THEN customer_id END) as absent_count
       FROM deliveries
       WHERE delivery_date = ?
     `).get(today);
 
-    const currentMonthPrefix = today.substring(0, 7);
     const monthDeliveries = db.prepare(`
       SELECT 
         COALESCE(SUM(CASE WHEN status = 'delivered' THEN quantity_liters ELSE 0 END), 0) as month_liters,

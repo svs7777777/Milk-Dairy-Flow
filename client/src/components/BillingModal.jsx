@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   X, Calendar, Droplets, CreditCard, Banknote, 
   Send, Printer, CheckCircle2, AlertTriangle, 
-  Clock, ArrowRight, History, Sparkles, ChevronDown, ChevronUp
+  Clock, ArrowRight, History, Sparkles, ChevronDown, ChevronUp, Layers
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { api } from '../services/api';
@@ -11,12 +11,13 @@ export default function BillingModal({
   customerId,
   onClose,
   onPaymentSuccess,
-  currentDate = '2026-09-26'
+  currentDate = '2026-09-27'
 }) {
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showPayForm, setShowPayForm] = useState(false);
   const [showDeliveryHistory, setShowDeliveryHistory] = useState(false);
+  const [billCycleMonth, setBillCycleMonth] = useState('2026-08-31'); // August 2026 or September 2026
   
   // Payment state
   const [payAmount, setPayAmount] = useState('');
@@ -26,13 +27,13 @@ export default function BillingModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [copiedNotice, setCopiedNotice] = useState(false);
 
-  const fetchReport = async () => {
+  const fetchReport = async (dateParam) => {
     try {
       setLoading(true);
-      const res = await api.getCustomerReport(customerId, currentDate);
+      const targetDate = dateParam || billCycleMonth;
+      const res = await api.getCustomerReport(customerId, targetDate);
       if (res.success) {
         setReport(res.data);
-        // Default payment amount to net due
         setPayAmount(res.data.pricing.net_due > 0 ? res.data.pricing.net_due.toString() : '');
         setPaymentMode(res.data.customer.preferred_payment_mode || 'cash');
       }
@@ -45,9 +46,9 @@ export default function BillingModal({
 
   useEffect(() => {
     if (customerId) {
-      fetchReport();
+      fetchReport(billCycleMonth);
     }
-  }, [customerId, currentDate]);
+  }, [customerId, billCycleMonth]);
 
   const handleRecordPayment = async (e) => {
     e.preventDefault();
@@ -61,17 +62,16 @@ export default function BillingModal({
         payment_mode: paymentMode,
         transaction_ref: transRef,
         notes: payNotes,
-        payment_date: currentDate
+        payment_date: billCycleMonth
       });
 
       if (res.success) {
-        // Trigger celebratory confetti
         confetti({
           particleCount: 80,
           spread: 60,
           origin: { y: 0.6 }
         });
-        await fetchReport();
+        await fetchReport(billCycleMonth);
         setShowPayForm(false);
         if (onPaymentSuccess) onPaymentSuccess();
       }
@@ -82,16 +82,22 @@ export default function BillingModal({
     }
   };
 
-  // Generate WhatsApp Message text
+  // Generate WhatsApp Message text with multi-milk breakdown
   const generateWhatsAppMessage = () => {
     if (!report) return '';
     const { customer, cycle, consumption, pricing } = report;
-    return `🥛 *${customer.name} - Milk Bill Statement*
+
+    let milkSection = `🍼 *Milk Type:* ${customer.milk_name}\n`;
+    if (consumption.milk_breakdown && consumption.milk_breakdown.length > 1) {
+      milkSection = `🍼 *Milk Breakdown:*\n` + 
+        consumption.milk_breakdown.map(m => `  • ${m.milk_name}: ${m.liters}L @ ₹${m.price_per_liter}/L = ₹${m.amount}`).join('\n') + `\n`;
+    }
+
+    return `🥛 *${customer.house_no} (${customer.name}) - Milk Bill Statement*
 --------------------------------
 📅 *Cycle:* ${cycle.start_date} to ${cycle.end_date}
 🏡 *House No:* ${customer.house_no || 'N/A'}
-🍼 *Milk Type:* ${customer.milk_name}
-📊 *Total Milk Consumed:* ${consumption.total_liters} Liters
+${milkSection}📊 *Total Milk Consumed:* ${consumption.total_liters} Liters
 ✅ *Days Received:* ${consumption.delivery_days} days
 ❌ *Days Absent (0L):* ${consumption.absent_days} days
 --------------------------------
@@ -101,8 +107,8 @@ export default function BillingModal({
 💵 *Amount Paid:* ₹${pricing.amount_paid}
 ⚠️ *Net Balance Due:* ₹${pricing.net_due}
 --------------------------------
-Mode: ${customer.preferred_payment_mode === 'upi' ? 'UPI Accepted' : 'Cash or UPI'}
-Kindly clear your pending balance. Thank you! 🙏`;
+Payment: ${customer.preferred_payment_mode === 'upi' ? 'UPI Accepted' : 'Cash or UPI'}
+Kindly clear your pending bill. Thank you! 🙏`;
   };
 
   const copyWhatsAppText = () => {
@@ -125,7 +131,7 @@ Kindly clear your pending balance. Thank you! 🙏`;
   if (loading || !report) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
-        <div className="bg-white p-8 rounded-3xl text-center">
+        <div className="bg-white p-8 rounded-3xl text-center shadow-2xl">
           <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-teal-600 mx-auto mb-3"></div>
           <p className="text-sm font-semibold text-slate-700">Calculating customer cycle & bill...</p>
         </div>
@@ -135,6 +141,7 @@ Kindly clear your pending balance. Thank you! 🙏`;
 
   const { customer, cycle, consumption, pricing, deliveries, payments } = report;
   const isPending = pricing.net_due > 0;
+  const hasMultipleMilk = consumption.milk_breakdown && consumption.milk_breakdown.length > 1;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/70 backdrop-blur-xs overflow-y-auto">
@@ -159,6 +166,9 @@ Kindly clear your pending balance. Thank you! 🙏`;
                 <span className="text-xs px-2 py-0.5 rounded-md bg-teal-500/20 text-teal-300 border border-teal-500/30 font-bold">
                   {customer.house_no}
                 </span>
+                <span className="text-[10px] px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 font-bold">
+                  {customer.society}
+                </span>
               </div>
               <p className="text-xs text-slate-300 mt-0.5">
                 📞 {customer.phone} • {customer.address}
@@ -166,48 +176,47 @@ Kindly clear your pending balance. Thank you! 🙏`;
             </div>
           </div>
 
-          {/* Cycle & Billing Dates Pill */}
+          {/* Month Selector & Cycle Pill */}
           <div className="mt-4 pt-4 border-t border-slate-700/60 flex flex-wrap items-center justify-between gap-2 text-xs">
-            <div className="flex items-center gap-2">
-              <Calendar className="w-4 h-4 text-teal-400" />
-              <span className="text-slate-300">Billing Cycle:</span>
-              <strong className="text-white">{cycle.start_date} to {cycle.end_date}</strong>
+            <div className="flex items-center gap-1.5 bg-slate-800/90 p-1 rounded-xl border border-slate-700">
+              <button
+                type="button"
+                onClick={() => setBillCycleMonth('2026-08-31')}
+                className={`px-3 py-1 rounded-lg font-bold text-xs transition-all ${
+                  billCycleMonth.startsWith('2026-08')
+                    ? 'bg-teal-500 text-white shadow-xs'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                August 2026 Bill
+              </button>
+              <button
+                type="button"
+                onClick={() => setBillCycleMonth('2026-09-27')}
+                className={`px-3 py-1 rounded-lg font-bold text-xs transition-all ${
+                  billCycleMonth.startsWith('2026-09')
+                    ? 'bg-teal-500 text-white shadow-xs'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                September 2026 Bill
+              </button>
             </div>
 
             <div className="flex items-center gap-1.5 bg-white/10 px-2.5 py-1 rounded-lg">
-              <Clock className="w-3.5 h-3.5 text-amber-400" />
-              <span>Next Bill Date: <strong>{cycle.billing_date}</strong></span>
-              {cycle.days_until_billing >= 0 && (
-                <span className="text-[10px] text-teal-300 font-bold ml-1">
-                  ({cycle.days_until_billing} days left)
-                </span>
-              )}
+              <Calendar className="w-3.5 h-3.5 text-teal-300" />
+              <span>Period: <strong>{cycle.start_date} to {cycle.end_date}</strong></span>
             </div>
           </div>
         </div>
 
-        {/* Advance 2-Day Reminder Alert Notice if triggered */}
-        {cycle.is_advance_reminder && (
-          <div className="bg-amber-50 border-b border-amber-200 px-5 py-3 flex items-center justify-between gap-3 text-xs text-amber-900">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-              <span>
-                <strong>Advance 2-Day Reminder:</strong> Billing cycle concludes on {cycle.billing_date}. Total consumption: <strong>{consumption.total_liters} Liters</strong>.
-              </span>
-            </div>
-            <span className="font-bold uppercase tracking-wider text-[10px] bg-amber-200 px-2 py-0.5 rounded-md">
-              Pending Alert
-            </span>
-          </div>
-        )}
-
         {/* Content Body */}
-        <div className="p-5 sm:p-6 space-y-6 max-h-[75vh] overflow-y-auto">
+        <div className="p-5 sm:p-6 space-y-5 max-h-[75vh] overflow-y-auto">
           
-          {/* 3 Metric Cards: Liters, Days, Rate */}
+          {/* 3 Metric Cards: Liters, Days, Absent */}
           <div className="grid grid-cols-3 gap-3">
             <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 text-center">
-              <span className="text-[10px] font-bold uppercase text-slate-500">Milk Consumed</span>
+              <span className="text-[10px] font-bold uppercase text-slate-500">Total Milk</span>
               <div className="flex items-baseline justify-center gap-1 mt-1">
                 <span className="text-xl sm:text-2xl font-black text-slate-900">
                   {consumption.total_liters}
@@ -217,44 +226,71 @@ Kindly clear your pending balance. Thank you! 🙏`;
             </div>
 
             <div className="bg-teal-50/70 p-3.5 rounded-2xl border border-teal-100 text-center">
-              <span className="text-[10px] font-bold uppercase text-teal-700">Delivered Days</span>
+              <span className="text-[10px] font-bold uppercase text-teal-700">Days Delivered</span>
               <div className="flex items-baseline justify-center gap-1 mt-1">
                 <span className="text-xl sm:text-2xl font-black text-teal-900">
-                  {consumption.delivery_days}
+                  {hasMultipleMilk ? `${consumption.delivery_days / 2}` : consumption.delivery_days}
                 </span>
                 <span className="text-xs font-semibold text-teal-600">days</span>
               </div>
             </div>
 
             <div className="bg-rose-50/70 p-3.5 rounded-2xl border border-rose-100 text-center">
-              <span className="text-[10px] font-bold uppercase text-rose-700">Days Absent (0L)</span>
+              <span className="text-[10px] font-bold uppercase text-rose-700">Days Absent</span>
               <div className="flex items-baseline justify-center gap-1 mt-1">
                 <span className="text-xl sm:text-2xl font-black text-rose-900">
                   {consumption.absent_days}
                 </span>
-                <span className="text-xs font-semibold text-rose-600">skipped</span>
+                <span className="text-xs font-semibold text-rose-600">days</span>
               </div>
             </div>
           </div>
 
-          {/* Pricing & Balance Calculation Breakdown */}
+          {/* Pricing & Itemized Milk Breakdown */}
           <div className="bg-slate-50 rounded-2xl p-4 sm:p-5 border border-slate-200">
             <div className="flex items-center justify-between pb-3 border-b border-slate-200">
-              <span className="text-xs font-bold text-slate-700 uppercase">Billing Calculation</span>
+              <span className="text-xs font-bold text-slate-700 uppercase">Statement Calculation</span>
               <span className="text-xs font-semibold text-teal-700">
-                {customer.milk_name} (@ ₹{customer.default_rate}/L)
+                {hasMultipleMilk ? 'Multiple Milk Varieties' : `${customer.milk_name} (@ ₹${customer.default_rate}/L)`}
               </span>
             </div>
 
-            <div className="space-y-2.5 mt-3 text-sm">
+            {/* ITEMIZED MILK BREAKDOWN (For Customers with Two Types of Milk, e.g. C-302) */}
+            {hasMultipleMilk ? (
+              <div className="mt-3 space-y-2 pb-3 border-b border-slate-200">
+                <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 block">
+                  🍼 Itemized Milk Breakdown
+                </span>
+                {consumption.milk_breakdown.map((item) => (
+                  <div
+                    key={item.milk_type_id}
+                    className="flex items-center justify-between p-2.5 rounded-xl bg-white border border-slate-200 shadow-2xs"
+                  >
+                    <div>
+                      <strong className="text-xs text-slate-900 font-extrabold">{item.milk_name}</strong>
+                      <p className="text-[11px] text-slate-500">
+                        {item.liters} Liters @ ₹{item.price_per_liter} / Liter
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-sm font-black text-slate-900">₹{item.amount.toLocaleString('en-IN')}</span>
+                      <span className="text-[10px] text-amber-700 block font-semibold">Pending</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            {/* Total Summary */}
+            <div className="space-y-2 mt-3 text-sm">
               <div className="flex justify-between text-slate-600">
-                <span>Current Cycle Milk ({consumption.total_liters} L × ₹{customer.default_rate}):</span>
+                <span>Cycle Milk Subtotal:</span>
                 <span className="font-semibold text-slate-900">₹{pricing.cycle_milk_cost.toFixed(2)}</span>
               </div>
 
               {pricing.previous_balance > 0 && (
                 <div className="flex justify-between text-amber-700">
-                  <span>Previous Unpaid Balance (Rolled over):</span>
+                  <span>Previous Unpaid Balance:</span>
                   <span className="font-bold">+ ₹{pricing.previous_balance.toFixed(2)}</span>
                 </div>
               )}
@@ -277,20 +313,20 @@ Kindly clear your pending balance. Thank you! 🙏`;
               }`}>
                 <div>
                   <p className="text-xs font-bold uppercase tracking-wider">
-                    {isPending ? '⚠️ Net Pending Balance' : '✅ Fully Cleared'}
+                    {isPending ? '⚠️ Net Pending Balance' : '✅ Bill Paid in Full'}
                   </p>
                   <p className="text-[11px] text-slate-500">
-                    Preferred: {customer.preferred_payment_mode === 'upi' ? 'UPI' : 'Cash'}
+                    Mode: {customer.preferred_payment_mode === 'upi' ? 'UPI' : 'Cash'}
                   </p>
                 </div>
                 <div className="text-right">
-                  <span className="text-2xl font-black">₹{pricing.net_due.toFixed(2)}</span>
+                  <span className="text-2xl font-black">₹{pricing.net_due.toLocaleString('en-IN')}</span>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Action Row: Collect Payment & WhatsApp Share */}
+          {/* Action Row: Record Payment & WhatsApp Share */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             <button
               onClick={() => setShowPayForm(!showPayForm)}
@@ -309,7 +345,6 @@ Kindly clear your pending balance. Thank you! 🙏`;
             </button>
           </div>
 
-          {/* Direct WhatsApp Message Link */}
           <div className="flex justify-end">
             <button
               onClick={openWhatsAppDirect}
@@ -319,198 +354,108 @@ Kindly clear your pending balance. Thank you! 🙏`;
             </button>
           </div>
 
-          {/* Partial Payment Collection Form */}
+          {/* Collapsible Payment Entry Form */}
           {showPayForm && (
-            <form onSubmit={handleRecordPayment} className="bg-teal-50/60 p-4 sm:p-5 rounded-2xl border border-teal-200 animate-in fade-in duration-150">
-              <h4 className="text-sm font-bold text-teal-900 mb-3 flex items-center gap-1.5">
-                <Sparkles className="w-4 h-4 text-teal-600" />
-                <span>Receive Payment (Partial Payments Supported)</span>
+            <form onSubmit={handleRecordPayment} className="p-4 rounded-2xl bg-teal-50/60 border border-teal-200 space-y-3 animate-in fade-in duration-150">
+              <h4 className="text-xs font-bold uppercase text-teal-900 flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-teal-600" />
+                <span>Enter Payment Received</span>
               </h4>
 
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                      Amount Paying (₹):
-                    </label>
-                    <input
-                      type="number"
-                      step="1"
-                      required
-                      value={payAmount}
-                      onChange={(e) => setPayAmount(e.target.value)}
-                      placeholder="e.g. 1000"
-                      className="w-full px-3 py-2 rounded-xl bg-white border border-slate-300 font-bold text-base text-slate-900 focus:outline-none focus:border-teal-500"
-                    />
-                    <p className="text-[10px] text-slate-500 mt-0.5">
-                      Remaining balance will automatically roll over!
-                    </p>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                      Payment Mode:
-                    </label>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setPaymentMode('cash')}
-                        className={`py-2 rounded-xl text-xs font-bold border flex items-center justify-center gap-1 transition-all ${
-                          paymentMode === 'cash'
-                            ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
-                            : 'bg-white text-slate-700 border-slate-200'
-                        }`}
-                      >
-                        <Banknote className="w-3.5 h-3.5" />
-                        <span>Cash</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setPaymentMode('upi')}
-                        className={`py-2 rounded-xl text-xs font-bold border flex items-center justify-center gap-1 transition-all ${
-                          paymentMode === 'upi'
-                            ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
-                            : 'bg-white text-slate-700 border-slate-200'
-                        }`}
-                      >
-                        <CreditCard className="w-3.5 h-3.5" />
-                        <span>UPI</span>
-                      </button>
-                    </div>
-                  </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-0.5">Amount (₹) *</label>
+                  <input
+                    type="number"
+                    step="1"
+                    required
+                    placeholder="e.g. 1860"
+                    value={payAmount}
+                    onChange={(e) => setPayAmount(e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-white text-slate-900"
+                  />
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                      Reference / UPI Txn ID (Optional):
-                    </label>
-                    <input
-                      type="text"
-                      value={transRef}
-                      onChange={(e) => setTransRef(e.target.value)}
-                      placeholder="e.g. UPI-9283749"
-                      className="w-full px-3 py-1.5 rounded-xl bg-white border border-slate-300 text-xs text-slate-800 focus:outline-none focus:border-teal-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
-                      Notes (Optional):
-                    </label>
-                    <input
-                      type="text"
-                      value={payNotes}
-                      onChange={(e) => setPayNotes(e.target.value)}
-                      placeholder="e.g. Paid part, balance on 5th"
-                      className="w-full px-3 py-1.5 rounded-xl bg-white border border-slate-300 text-xs text-slate-800 focus:outline-none focus:border-teal-500"
-                    />
-                  </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-600 uppercase mb-0.5">Payment Mode *</label>
+                  <select
+                    value={paymentMode}
+                    onChange={(e) => setPaymentMode(e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-white text-slate-900"
+                  >
+                    <option value="cash">Cash Received</option>
+                    <option value="upi">UPI / Online Bank</option>
+                  </select>
                 </div>
+              </div>
 
+              <div>
+                <label className="block text-[10px] font-bold text-slate-600 uppercase mb-0.5">Notes / Receipt Ref</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Paid in cash on delivery"
+                  value={payNotes}
+                  onChange={(e) => setPayNotes(e.target.value)}
+                  className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs bg-white text-slate-900"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowPayForm(false)}
+                  className="flex-1 py-1.5 rounded-lg border border-slate-200 text-slate-600 text-xs font-bold"
+                >
+                  Cancel
+                </button>
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md tap-bounce transition-all flex items-center justify-center gap-2"
+                  className="flex-1 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold shadow-xs tap-bounce"
                 >
-                  <CheckCircle2 className="w-4 h-4 text-teal-400" />
-                  <span>Confirm & Save Payment of ₹{payAmount || '0'}</span>
+                  {isSubmitting ? 'Recording...' : 'Confirm Payment'}
                 </button>
               </div>
             </form>
           )}
 
-          {/* Toggleable Delivery Day-by-Day Calendar Log */}
-          <div>
+          {/* Toggle Deliveries History */}
+          <div className="pt-2 border-t border-slate-100">
             <button
               onClick={() => setShowDeliveryHistory(!showDeliveryHistory)}
-              className="w-full flex items-center justify-between p-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold transition-colors"
+              className="w-full flex items-center justify-between text-xs font-bold text-slate-600 hover:text-slate-900 py-2"
             >
-              <div className="flex items-center gap-2">
-                <History className="w-4 h-4 text-teal-600" />
-                <span>View Exact Day-by-Day Delivery History ({deliveries.length} entries)</span>
+              <div className="flex items-center gap-1.5">
+                <History className="w-3.5 h-3.5 text-slate-400" />
+                <span>Daily Delivery Register ({deliveries.length} days)</span>
               </div>
               {showDeliveryHistory ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
             </button>
 
             {showDeliveryHistory && (
-              <div className="mt-3 border border-slate-200 rounded-2xl overflow-hidden animate-in fade-in duration-150">
-                <div className="max-h-60 overflow-y-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200 sticky top-0">
-                      <tr>
-                        <th className="py-2.5 px-3">Date</th>
-                        <th className="py-2.5 px-3">Status</th>
-                        <th className="py-2.5 px-3">Liters</th>
-                        <th className="py-2.5 px-3">Rate</th>
-                        <th className="py-2.5 px-3">Day Total</th>
-                        <th className="py-2.5 px-3">Note</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {deliveries.map((del) => (
-                        <tr key={del.id} className={del.status === 'absent' ? 'bg-rose-50/30' : ''}>
-                          <td className="py-2 px-3 font-semibold text-slate-800">{del.delivery_date}</td>
-                          <td className="py-2 px-3">
-                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                              del.status === 'delivered' ? 'bg-teal-50 text-teal-700' : 'bg-rose-50 text-rose-700'
-                            }`}>
-                              {del.status === 'delivered' ? 'Delivered' : 'Absent (0L)'}
-                            </span>
-                          </td>
-                          <td className="py-2 px-3 font-bold text-slate-900">{del.quantity_liters} L</td>
-                          <td className="py-2 px-3 text-slate-600">₹{del.price_per_liter}</td>
-                          <td className="py-2 px-3 font-bold text-slate-900">
-                            ₹{(del.quantity_liters * del.price_per_liter).toFixed(0)}
-                          </td>
-                          <td className="py-2 px-3 text-slate-400 truncate max-w-[120px]">{del.notes || '-'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+              <div className="mt-2 space-y-1.5 max-h-48 overflow-y-auto pr-1 animate-in fade-in duration-150">
+                {deliveries.map((del) => (
+                  <div
+                    key={del.id}
+                    className="flex items-center justify-between p-2 rounded-xl bg-slate-50 border border-slate-200/60 text-xs"
+                  >
+                    <div>
+                      <span className="font-bold text-slate-800">{del.delivery_date}</span>
+                      <span className="text-[11px] text-slate-500 ml-2">
+                        {del.milk_name} ({del.quantity_liters}L @ ₹{del.price_per_liter}/L)
+                      </span>
+                    </div>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                      del.status === 'delivered' ? 'bg-teal-100 text-teal-800' : 'bg-rose-100 text-rose-800'
+                    }`}>
+                      {del.status === 'delivered' ? `${del.quantity_liters}L Delivered` : 'Absent'}
+                    </span>
+                  </div>
+                ))}
               </div>
             )}
           </div>
 
-          {/* Previous Payments History */}
-          {payments.length > 0 && (
-            <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200">
-              <span className="text-xs font-bold text-slate-700 uppercase block mb-2">
-                Recent Payments Made
-              </span>
-              <div className="space-y-1.5">
-                {payments.map((p) => (
-                  <div key={p.id} className="flex items-center justify-between text-xs py-1 px-2 bg-white rounded-lg border border-slate-100">
-                    <span className="text-slate-600">{p.payment_date}</span>
-                    <span className="uppercase text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-700">
-                      {p.payment_mode}
-                    </span>
-                    <span className="font-bold text-emerald-600">₹{p.amount.toFixed(2)}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-        </div>
-
-        {/* Footer */}
-        <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
-          <button
-            onClick={() => window.print()}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 text-xs font-bold hover:bg-slate-100 transition-colors"
-          >
-            <Printer className="w-4 h-4 text-slate-500" />
-            <span>Print Invoice</span>
-          </button>
-
-          <button
-            onClick={onClose}
-            className="px-5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-colors"
-          >
-            Close
-          </button>
         </div>
 
       </div>

@@ -110,12 +110,12 @@ export default function Navbar({
               )}
             </button>
 
-            {/* Manage Admins Shortcut (for adding Admin 2, Admin 3...) */}
-            {user?.role === 'admin' && (
+            {/* Manage Admins Shortcut (Official Admin or Admin) */}
+            {(user?.role === 'admin' || user?.role === 'official_admin') && (
               <button
                 onClick={onOpenAdminManager}
-                className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700 transition-colors"
-                title="Manage Admins (Add Admin 2, Admin 3...)"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700 transition-colors shadow-2xs"
+                title="Manage Admins & Change Name"
               >
                 <Users className="w-3.5 h-3.5 text-teal-600" />
                 <span>Admins</span>
@@ -125,14 +125,19 @@ export default function Navbar({
             {/* User Account & Logout */}
             {user && (
               <div className="flex items-center gap-2">
-                <div className="hidden sm:block text-right">
-                  <p className="text-xs font-bold text-slate-800 leading-tight">
-                    {user.name || user.username || 'Admin 1'}
+                <button
+                  type="button"
+                  onClick={onOpenAdminManager}
+                  className="hidden sm:block text-right hover:opacity-80 transition-opacity"
+                  title="Click to change your admin name"
+                >
+                  <p className="text-xs font-black text-slate-800 leading-tight">
+                    {user.name || user.username || 'Official Admin'}
                   </p>
-                  <p className="text-[10px] text-teal-600 uppercase font-semibold">
-                    {user.role === 'admin' ? '👑 Admin 1' : '👤 Customer'}
+                  <p className="text-[10px] text-teal-600 uppercase font-black tracking-wider">
+                    {user.role === 'official_admin' ? '👑 Official Admin' : '👤 Admin'}
                   </p>
-                </div>
+                </button>
                 <button
                   onClick={onLogout}
                   className="p-2 sm:px-3 sm:py-1.5 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold transition-colors flex items-center gap-1"
