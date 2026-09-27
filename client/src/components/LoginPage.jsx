@@ -10,12 +10,12 @@ export default function LoginPage({ onLoginSuccess }) {
   const [activeTab, setActiveTab] = useState('admin'); // 'admin' or 'customer'
   
   // Admin Login State
-  const [adminUsername, setAdminUsername] = useState('admin1');
-  const [adminPassword, setAdminPassword] = useState('Dairy@2026');
+  const [adminUsername, setAdminUsername] = useState('');
+  const [adminPassword, setAdminPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   
   // Customer Login State
-  const [customerPhone, setCustomerPhone] = useState('+91 98201 30500'); // Safar Villa 305
+  const [customerPhone, setCustomerPhone] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   const [otpCode, setOtpCode] = useState('');
   const [demoOtp, setDemoOtp] = useState('');
@@ -175,24 +175,6 @@ export default function LoginPage({ onLoginSuccess }) {
           {/* TAB 1: ADMIN LOGIN FORM */}
           {activeTab === 'admin' && (
             <form onSubmit={handleAdminLogin} className="space-y-4">
-              
-              {/* Admin 1 Credentials Pill */}
-              <div className="p-3.5 rounded-2xl bg-teal-50 border border-teal-200 text-xs text-teal-900">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="font-extrabold flex items-center gap-1.5">
-                    <Sparkles className="w-3.5 h-3.5 text-teal-600" />
-                    <span>Admin 1 Login Credentials:</span>
-                  </span>
-                  <span className="text-[10px] uppercase font-bold bg-teal-200 px-1.5 py-0.5 rounded text-teal-900">
-                    Active
-                  </span>
-                </div>
-                <div className="flex items-center justify-between text-[11px] text-slate-700 mt-1">
-                  <span>Username: <strong className="font-bold text-slate-900">admin1</strong></span>
-                  <span>Password: <strong className="font-bold text-slate-900">Dairy@2026</strong></span>
-                </div>
-              </div>
-
               <div>
                 <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
                   Admin Username or Email
@@ -204,7 +186,7 @@ export default function LoginPage({ onLoginSuccess }) {
                     required
                     value={adminUsername}
                     onChange={(e) => setAdminUsername(e.target.value)}
-                    placeholder="admin1"
+                    placeholder="Enter admin username"
                     className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 text-sm font-semibold text-slate-900 focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
                   />
                 </div>
@@ -271,7 +253,7 @@ export default function LoginPage({ onLoginSuccess }) {
                         required
                         value={customerPhone}
                         onChange={(e) => setCustomerPhone(e.target.value)}
-                        placeholder="+91 98201 30500"
+                        placeholder="Enter registered mobile number"
                         className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 text-sm font-semibold text-slate-900 focus:outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
                       />
                     </div>
