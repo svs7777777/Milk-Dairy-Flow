@@ -26,9 +26,11 @@ function getTodayStr() {
 
 export default function App() {
   // Current logged in user (Admin 1 or Customer)
+  // Use sessionStorage so fresh visitors and new tabs ALWAYS start on the LoginPage!
   const [currentUser, setCurrentUser] = useState(() => {
     try {
-      const saved = localStorage.getItem('dairy_flow_session');
+      localStorage.removeItem('dairy_flow_session'); // Clear old persistent session
+      const saved = sessionStorage.getItem('dairy_flow_session');
       return saved ? JSON.parse(saved) : null;
     } catch (e) {
       return null;
@@ -57,11 +59,11 @@ export default function App() {
   const [showAdminManagerModal, setShowAdminManagerModal] = useState(false);
   const [dismissAdvanceBanner, setDismissAdvanceBanner] = useState(false);
 
-  // Initial Load
+  // Initial Load with resilient Promise.allSettled
   const loadAllData = async () => {
     try {
       setLoading(true);
-      const [milkRes, custRes, delivRes, statsRes, alertsRes] = await Promise.all([
+      const [milkRes, custRes, delivRes, statsRes, alertsRes] = await Promise.allSettled([
         api.getMilkTypes(),
         api.getCustomers(),
         api.getDeliveriesByDate(selectedDate),
@@ -69,11 +71,11 @@ export default function App() {
         api.getDueAlerts(selectedDate)
       ]);
 
-      if (milkRes.success) setMilkTypes(milkRes.data);
-      if (custRes.success) setCustomers(custRes.data);
-      if (delivRes.success) setChecklist(delivRes.data);
-      if (statsRes.success) setStats(statsRes.data);
-      if (alertsRes.success) setDueAlerts(alertsRes);
+      if (milkRes.status === 'fulfilled' && milkRes.value?.success) setMilkTypes(milkRes.value.data);
+      if (custRes.status === 'fulfilled' && custRes.value?.success) setCustomers(custRes.value.data);
+      if (delivRes.status === 'fulfilled' && delivRes.value?.success) setChecklist(delivRes.value.data);
+      if (statsRes.status === 'fulfilled' && statsRes.value?.success) setStats(statsRes.value.data);
+      if (alertsRes.status === 'fulfilled' && alertsRes.value) setDueAlerts(alertsRes.value);
     } catch (err) {
       console.error('Data load error:', err);
     } finally {
@@ -86,14 +88,14 @@ export default function App() {
     if (!currentUser) return;
     const refreshDeliveries = async () => {
       try {
-        const [delivRes, statsRes, alertsRes] = await Promise.all([
+        const [delivRes, statsRes, alertsRes] = await Promise.allSettled([
           api.getDeliveriesByDate(selectedDate),
           api.getDashboardStats(selectedDate),
           api.getDueAlerts(selectedDate)
         ]);
-        if (delivRes.success) setChecklist(delivRes.data);
-        if (statsRes.success) setStats(statsRes.data);
-        if (alertsRes.success) setDueAlerts(alertsRes);
+        if (delivRes.status === 'fulfilled' && delivRes.value?.success) setChecklist(delivRes.value.data);
+        if (statsRes.status === 'fulfilled' && statsRes.value?.success) setStats(statsRes.value.data);
+        if (alertsRes.status === 'fulfilled' && alertsRes.value) setDueAlerts(alertsRes.value);
       } catch (err) {
         console.error('Error refreshing date data:', err);
       }
@@ -180,6 +182,7 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    sessionStorage.removeItem('dairy_flow_session');
     localStorage.removeItem('dairy_flow_session');
     setCurrentUser(null);
   };

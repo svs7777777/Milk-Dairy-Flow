@@ -41,7 +41,8 @@ export default function LoginPage({ onLoginSuccess }) {
           ...res.user,
           token: res.token
         };
-        localStorage.setItem('dairy_flow_session', JSON.stringify(sessionData));
+        sessionStorage.setItem('dairy_flow_session', JSON.stringify(sessionData));
+        localStorage.removeItem('dairy_flow_session');
         onLoginSuccess(sessionData);
       } else {
         setErrorMessage(res.error || 'Invalid credentials');

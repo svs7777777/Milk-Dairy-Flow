@@ -936,8 +936,8 @@ app.post('/api/auth/verify-otp', (req, res) => {
   }
 });
 
-// Live Analytics
-app.get('/api/analytics/dashboard', (req, res) => {
+// Live Analytics & Dashboard Stats
+const handleDashboardStats = (req, res) => {
   try {
     const today = getTodayStr();
     const currentMonthPrefix = today.substring(0, 7);
@@ -988,7 +988,10 @@ app.get('/api/analytics/dashboard', (req, res) => {
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
-});
+};
+
+app.get('/api/dashboard/stats', handleDashboardStats);
+app.get('/api/analytics/dashboard', handleDashboardStats);
 
 // Serve frontend static files if built
 app.use(express.static(path.join(__dirname, '../client/dist')));

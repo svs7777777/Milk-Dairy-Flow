@@ -11,7 +11,7 @@ export default function AdminManagementModal({ onClose, onAdminUpdated }) {
   const [showAddForm, setShowAddForm] = useState(false);
   
   // Current logged in admin session
-  const currentSession = JSON.parse(localStorage.getItem('dairy_flow_session') || '{}');
+  const currentSession = JSON.parse(sessionStorage.getItem('dairy_flow_session') || '{}');
   const isOfficialAdmin = currentSession.role === 'official_admin' || currentSession.id === 'admin_1';
 
   // Name Change State (Available to ALL Admins)
@@ -58,7 +58,7 @@ export default function AdminManagementModal({ onClose, onAdminUpdated }) {
       if (res.success) {
         // Update local session
         const updatedSession = { ...currentSession, name: myNewName.trim() };
-        localStorage.setItem('dairy_flow_session', JSON.stringify(updatedSession));
+        sessionStorage.setItem('dairy_flow_session', JSON.stringify(updatedSession));
         setIsEditingMyName(false);
         fetchAdmins();
         if (onAdminUpdated) onAdminUpdated(updatedSession);
